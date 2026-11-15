@@ -10,5 +10,5 @@
     "isolatedModules": true,
     "types": ["vite/client"]
   },
-  "include": ["front-end/src"]
+  "include": ["src"]
 }

@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "isolatedModules": true
   },
-  "include": ["front-end/sw.ts"]
+  "include": ["sw.ts"]
 }

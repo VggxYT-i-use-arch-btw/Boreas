@@ -9,7 +9,7 @@ function classicGlobalBridge() {
     name: "boreas-classic-global-bridge",
     enforce: "pre" as const,
     transform(source: string, id: string) {
-      if (!id.includes("/front-end/src/legacy/") || !id.endsWith(".ts")) return null;
+      if (!id.includes("/src/legacy/") || !id.endsWith(".ts")) return null;
       const file = ts.createSourceFile(id, source, ts.ScriptTarget.Latest, true);
       const names = new Set<string>();
       const declaredVars = new Set<string>();
@@ -39,16 +39,16 @@ function classicGlobalBridge() {
 
 function serviceWorkerAsset() {
   async function compileWorker(): Promise<string> {
-    const sourcePath = path.resolve("front-end/sw.ts");
+    const sourcePath = path.resolve("sw.ts");
     const [workerSource, configSource] = await Promise.all([
       readFile(sourcePath, "utf8"),
-      readFile(path.resolve("front-end/src/config/backend.ts"), "utf8"),
+      readFile(path.resolve("src/config/backend.ts"), "utf8"),
     ]);
     const backendUrl = configSource.match(/backendBaseUrl\s*=\s*["']([^"']+)["']/)?.[1];
     if (!backendUrl) throw new Error("backendBaseUrl não definido em src/config/backend.ts");
     const source = workerSource.replace("__BOREAS_BACKEND_URL__", backendUrl);
     const result = await build({
-      stdin: { contents: source, resolveDir: path.resolve("front-end"), sourcefile: sourcePath, loader: "ts" },
+      stdin: { contents: source, resolveDir: path.resolve("."), sourcefile: sourcePath, loader: "ts" },
       bundle: true,
       format: "iife",
       platform: "browser",
@@ -81,12 +81,12 @@ function serviceWorkerAsset() {
 
 export default defineConfig({
   plugins: [classicGlobalBridge(), serviceWorkerAsset()],
-  root: "front-end",
+  root: ".",
   // GitHub Pages serves this project under its repository path.
   base: "/Boreas/",
   publicDir: "public",
   build: {
-    outDir: "../dist",
+    outDir: "dist",
     emptyOutDir: true,
     assetsInlineLimit: 0,
   },
