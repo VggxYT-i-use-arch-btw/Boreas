@@ -1,0 +1,80 @@
+/* Settings and all dialog surfaces */
+#settings-overlay { background: rgba(4,5,10,.86); }
+.settings-views { width: min(760px, 100%); height: min(900px, 100%); margin: auto; background: rgba(13,16,24,.97); border: 1px solid var(--border); border-radius: 28px; box-shadow: var(--shadow-lg); }
+.settings-view { background: transparent; }
+.settings-header { padding: 24px 26px 18px; border-bottom: 1px solid var(--border-soft); }
+.settings-title { font-size: 20px; letter-spacing: -.04em; }
+.settings-close, .settings-back { width: 38px; height: 38px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); }
+.settings-body { padding: 20px 26px 30px; gap: 9px; }
+.settings-profile-card { padding: 16px; border-radius: 18px; border-color: var(--border); background: linear-gradient(135deg, rgba(47,143,157,.12), rgba(255,255,255,.035)); }
+.settings-avatar-lg { width: 48px; height: 48px; }
+.settings-user-name { font-size: 15px; }
+.settings-user-email { font-size: 11px; }
+.settings-section-label { padding: 22px 4px 8px; font-size: 12.5px; font-weight: 600; color: var(--text-dim); letter-spacing: normal; text-transform: none; }
+.settings-section-label:first-of-type { padding-top: 14px; }
+.settings-menu-group { border-radius: 17px; border-color: var(--border-soft); background: var(--surface); }
+.settings-menu-item { min-height: 51px; padding: 13px 15px; font-size: 13px; }
+.settings-menu-item:hover { background: var(--hover); }
+.settings-menu-icon { color: var(--text-dim); }
+.settings-row { padding: 14px 15px; border-radius: 16px; border-color: var(--border-soft); background: var(--surface); }
+.settings-row-label { font-size: 13px; }
+.settings-row-sub { max-width: 520px; line-height: 1.45; font-size: 11px; }
+.toggle-switch { width: 46px; height: 27px; }
+.toggle-switch.on { background: linear-gradient(135deg, #2f8f9d, #52b3bf); }
+.settings-input, .settings-textarea { padding: 13px 14px; border-radius: 13px; background: var(--surface); border-color: var(--border-soft); }
+.settings-save-btn { border-radius: 13px; background: linear-gradient(135deg, #2f8f9d, #52b3bf); }
+.settings-logout-btn { margin-top: 14px; border-radius: 14px; }
+#coming-soon-overlay, #rename-overlay, #resume-overlay { background: rgba(3,4,9,.9); }
+.coming-soon-card, .rename-card, .resume-card { border-color: var(--border); border-radius: 22px; background: rgba(17,20,30,.96); box-shadow: var(--shadow-lg); }
+.coming-soon-emoji { filter: grayscale(.2); }
+.rename-card, .resume-card { padding: 26px; }
+#rename-input { background: var(--surface); border-color: var(--border-soft); }
+#rename-cancel, #rename-confirm, .resume-result-btn, .coming-soon-btn { border-radius: 12px; }
+.memory-info-popup { border-color: var(--border); border-radius: 18px; background: rgba(17,20,30,.96); }
+
+/* Bottom sheets and task cards */
+#attach-sheet, #thinking-sheet { border-color: var(--border); background: rgba(17,20,30,.97); box-shadow: 0 -20px 70px rgba(0,0,0,.35); }
+.asheet-card, .asheet-row { border: 1px solid var(--border-soft); background: var(--surface); }
+.asheet-card:hover, .asheet-row:hover { background: var(--hover); }
+.tasks-pill, .thinking-pill, .file-chip { border-color: var(--border-soft); background: var(--surface); }
+.dr-card, .aup-card { border-color: var(--border-soft); background: var(--surface); }
+
+@media (min-width: 1100px) {
+  /* #chat-screen, #sidebar (transform) e .sidebar-close-btn (display) foram
+     removidos daqui: esse bloco duplicava o @media (min-width: 1100px) mais
+     abaixo (linha ~394), só que com valores fixos e um !important no
+     #sidebar. !important sempre ganha de especificidade normal, então o
+     "body.sidebar-closed #sidebar { transform: translateX(-100%) }" do
+     bloco de baixo NUNCA conseguia esconder a sidebar - era isso que fazia
+     o botão de fechar (X) não funcionar em telas >=1100px, e o layout
+     bugar (o #chat-screen expandia pra largura cheia via
+     "body.sidebar-closed #chat-screen", mas a sidebar continuava visível
+     por cima/atrás, presa aberta). */
+  #sidebar-overlay { display: none; }
+  .settings-views { max-height: calc(100vh - 48px); }
+}
+
+@media (max-width: 640px) {
+  #onboard-screen { justify-content: center; }
+  .ob-logo-wrap { margin-bottom: 24px; }
+  .ob-tagline { width: min(100%, 350px); max-width: 350px; font-size: 29px; }
+  .ob-actions { flex-direction: column-reverse; width: min(360px, calc(100% - 32px)); }
+  #ob-form-sheet { bottom: 0; left: 0; right: 0; width: 100vw; max-width: 100vw; transform: translateY(calc(100% + 40px)); max-height: min(760px, 94vh); border-radius: 26px 26px 0 0; }
+  #ob-form-sheet.open { transform: translateY(0); }
+  #messages { padding-top: 18px; }
+  .empty-state { padding: 8vh 0 7vh; }
+  .empty-logo-img { width: 78px; height: 78px; }
+  .empty-text { font-size: 29px; }
+  .empty-subtitle { max-width: 290px; font-size: 12px; line-height: 1.5; }
+  #starter-chips { justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; scrollbar-width: none; }
+  #starter-chips::-webkit-scrollbar { display: none; }
+  #starter-chips button { flex: 0 0 auto; }
+  .input-row { border-radius: 19px; }
+  .settings-views { height: 100%; border: 0; border-radius: 0; }
+  .settings-header { padding: max(18px, env(safe-area-inset-top)) 18px 15px; }
+  .settings-body { padding: 16px 18px max(24px, env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

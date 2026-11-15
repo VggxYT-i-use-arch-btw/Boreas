@@ -1,0 +1,75 @@
+/* Thinking trace and tool states: one compact accordion, with readable
+   loading/completion/error affordances and no decorative perpetual motion. */
+.thinking-trace-toggle { min-height: 31px; width: min(100%, 720px); margin: 2px 0 2px; padding: 5px 3px; border-radius: 6px; font-size: 12px; }
+.thinking-trace-toggle:hover, .thinking-trace-toggle.is-expanded { background: var(--surface); }
+.thinking-trace-chevron { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font: inherit; }
+.thinking-trace-chevron .ph { font-size: 15px; }
+.thinking-trace-current-dot { background: var(--accent-strong); }
+.thinking-trace-preview.is-shimmer, .subagent-row.is-running .subagent-row-label { animation: none; color: var(--text-faint); background: none; }
+.thinking-trace-detail { margin-bottom: 8px; padding-left: 12px; }
+.thinking-trace-timeline::before { background: var(--border); }
+.thinking-trace-item { padding: 7px 0 10px; }
+.thinking-trace-item-icon { color: var(--accent-text); background: var(--bg-elev); }
+.thinking-trace-item-title { font-size: 13px; font-weight: 600; }
+.thinking-trace-item-summary { font-size: 12px; }
+.trace-tool .thinking-trace-item-title, .trace-subagent .thinking-trace-item-title, .subagent-trace-name, .thinking-trace-completed { font-weight: 600; }
+.thinking-trace-raw { border-radius: 7px; background: var(--surface); }
+.subagent-trace-card, .dr-card, .aup-card, .tool-activity-card { border-radius: 8px; background: var(--surface); box-shadow: none; }
+.subagent-trace-card { padding: 11px 12px; }
+.subagent-trace-card { background: transparent; }
+.tool-activity-card { border: 1px solid var(--border-soft); background: transparent; }
+.tool-activity-card:hover, .tool-activity-card.expanded { border-color: var(--border); background: var(--surface-strong); }
+.tool-activity-header { min-height: 38px; padding: 7px 10px; }
+.tool-activity-icon { background: transparent; color: var(--accent-text); }
+.tool-activity-title { color: var(--text-dim); }
+.tool-activity-title { font-size: 13px; }
+.tool-activity-value, .tool-activity-output { color: var(--text-faint); font-size: 12px; }
+.tool-activity-status { display: inline-flex; align-items: center; margin-left: auto; color: var(--text-faint); font-size: 12px; white-space: nowrap; }
+.tool-activity-card:not(.is-done) .tool-activity-status { color: var(--accent-text); }
+.tool-activity-card.is-done .tool-activity-status { color: var(--text-faint); }
+.tool-activity-body { padding: 0 10px 10px 39px; }
+
+/* Inline error and loading states use the same border language. */
+.sidebar-error-toast, .ob-error { border-color: rgba(255,141,156,.35); color: #ffb3bd; }
+.sidebar-error-toast { border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.28); }
+.settings-title, .sidebar-logo-name { font-weight: 600; }
+#msg-input::placeholder { color: var(--text-faint); }
+.sidebar-chat-item.pressing, #hamburger-btn:active, #attach-btn:active, #send-btn:not(:disabled):active { transform: scale(.97); }
+.sidebar-chat-item.pressing, #hamburger-btn:active, #attach-btn:active, #send-btn:not(:disabled):active { transition: transform .16s ease-out, background-color .16s ease-out; }
+.sidebar-chat-item.pressing { background: var(--hover); }
+
+/* Dialog family: modal surfaces use one compact product radius; bottom sheets
+   keep only their top corners rounded where the viewport requires it. */
+#usage-modal, .coming-soon-card, .rename-card, .resume-card, .memory-info-popup { border-radius: 12px; }
+#usage-modal { box-shadow: 0 1px 2px rgba(0,0,0,.28); }
+.usage-modal-header, #usage-modal-body { border-color: var(--border-soft); }
+.usage-loading { display: flex; justify-content: center; padding: 12px 0; }
+.ui-skeleton-line { display: block; width: 68%; max-width: 260px; height: 11px; border: 1px solid var(--border-soft); border-radius: 4px; background: var(--surface-strong); }
+
+/* Keep the existing Boreas teal accent consistent in secondary surfaces. */
+.usage-tab.active { background: var(--accent-soft); border-color: rgba(82,179,191,.35); color: var(--accent-text); }
+.usage-visual-card { background: var(--surface); }
+.usage-visual-prompt { background: var(--accent); }
+.usage-visual-completion { background: var(--accent-strong); }
+.usage-dot.prompt { background: var(--accent); }
+.usage-dot.completion { background: var(--accent-strong); }
+#memory-editor-save, .resume-result-btn, #rename-confirm { background: var(--accent-soft); border-color: rgba(82,179,191,.35); color: var(--accent-text); }
+#memory-editor-save:hover, .resume-result-btn:hover, #rename-confirm:hover { background: rgba(47,143,157,.24); }
+#rename-input:focus { border-color: var(--accent-strong); }
+.coming-soon-emoji { color: var(--accent-text); filter: none; }
+.coming-soon-emoji .ph { font-size: 26px; }
+
+@media (min-width: 1100px) {
+  #chat-screen { margin-left: 286px; width: calc(100% - 286px); }
+  #messages { max-width: 860px; }
+  .input-row { width: min(760px, calc(100% - 32px)); }
+}
+
+@media (max-width: 640px) {
+  .top-bar { min-height: 54px; padding-inline: 12px; }
+  #messages { padding: 18px 16px 14px; }
+  .bubble.user { max-width: 88%; }
+  .input-row { border-radius: 12px; margin-bottom: max(14px, env(safe-area-inset-bottom)); }
+  .settings-views { width: 100%; height: 100%; border-radius: 0; }
+  #usage-modal { border-radius: 12px 12px 0 0; }
+}

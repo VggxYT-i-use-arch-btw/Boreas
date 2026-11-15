@@ -1,0 +1,701 @@
+// Boreas: composer, input formatting, plugins, and mentions.
+
+import type { ChatMessage } from "../types/chat";
+
+declare const TIERS: Record<string, { label: string }>;
+declare const TIER_SPEEDS: Record<string, string>;
+declare const NO_VISION_TIERS: string[];
+declare const NO_VISION_LABEL: Record<string, string>;
+declare const EFFORT_TIERS: string[];
+declare const TIER_EFFORTS: Record<string, { levels: string[] }>;
+declare const EFFORT_LABELS: Record<string, string>;
+declare var currentTier: string;
+declare let currentSpeed: string;
+declare let currentEffort: string;
+declare const LAST_TIER_KEY: string;
+declare const ACCOUNT_SCOPE: string;
+declare const messages: ChatMessage[];
+declare const lockBar: HTMLElement;
+declare const inputRow: HTMLDivElement;
+declare function lastEffortFor(tier: string): string;
+declare function syncEffortUI(): void;
+declare function saveCurrentMessages(): void | Promise<void>;
+declare function closeAttachSheet(): void;
+declare function send(): void | Promise<void>;
+declare function showToast(message: string): void;
+
+const elementById = <T extends HTMLElement = HTMLElement>(id: string): T =>
+  document.getElementById(id) as T;
+const elementBySelector = <T extends HTMLElement = HTMLElement>(selector: string): T =>
+  document.querySelector(selector) as T;
+
+const modelPill = elementById<HTMLDivElement>("model-pill");
+var modelLabel = elementById<HTMLSpanElement>("model-label");
+
+const noVisionWarnEl = elementById<HTMLDivElement>("novision-warn");
+const noVisionWarnText = elementById<HTMLDivElement>("novision-warn-text");
+let noVisionWarnTimeout: ReturnType<typeof setTimeout> | null = null;
+function showNoVisionWarn(text: string): void {
+  if (!noVisionWarnEl) return;
+  noVisionWarnText.textContent = text;
+  noVisionWarnEl.classList.add("show");
+  if (noVisionWarnTimeout !== null) clearTimeout(noVisionWarnTimeout);
+  noVisionWarnTimeout = setTimeout(() => noVisionWarnEl.classList.remove("show"), 2800);
+}
+
+modelLabel.textContent = TIERS[currentTier].label;
+document.querySelectorAll<HTMLElement>(".model-option").forEach(o =>
+  o.classList.toggle("active", o.dataset.tier === currentTier)
+);
+syncEffortUI();
+
+modelPill.addEventListener("click", e => { modelPill.classList.toggle("open"); e.stopPropagation(); });
+modelPill.addEventListener("pointerdown", e => { const target = e.target instanceof Element ? e.target : null; if (target && (target === modelPill || target === modelLabel || target.closest(".model-pill") === modelPill && !target.closest(".model-dropdown"))) { modelPill.classList.add("pressing"); } });
+modelPill.addEventListener("pointerup",     () => modelPill.classList.remove("pressing"));
+modelPill.addEventListener("pointerleave",  () => modelPill.classList.remove("pressing"));
+document.addEventListener("click", () => {
+  modelPill.classList.remove("open");
+  document.getElementById("effort-section")?.classList.remove("open");
+});
+
+document.querySelectorAll<HTMLElement>(".model-option").forEach(opt => {
+  opt.addEventListener("click", e => {
+    e.stopPropagation();
+    const tier = String(opt.dataset.tier ?? "");
+    if (!Object.hasOwn(TIERS, tier) || !Object.hasOwn(TIER_SPEEDS, tier)) return;
+
+    if (NO_VISION_TIERS.includes(tier)) {
+      const hasImages = messages.some(m =>
+        Array.isArray(m.content) && m.content.some(p => p.type === "image_url")
+      );
+      if (hasImages) {
+        modelPill.classList.remove("open");
+        showNoVisionWarn(`${NO_VISION_LABEL[tier]} não suporta imagens nesta conversa`);
+        return;
+      }
+    }
+
+    currentTier = tier;
+    currentSpeed = TIER_SPEEDS[currentTier];
+    currentEffort = EFFORT_TIERS.includes(currentTier) ? lastEffortFor(currentTier) : "default";
+    modelLabel.textContent = TIERS[tier].label;
+    document.querySelectorAll<HTMLElement>(".model-option").forEach(o => o.classList.remove("active"));
+    opt.classList.add("active");
+    syncEffortUI();
+    modelPill.classList.remove("open");
+    updateImageAttach();
+
+    localStorage.setItem(LAST_TIER_KEY, currentTier);
+
+    saveCurrentMessages();
+  });
+});
+
+const effortSection = document.getElementById("effort-section");
+document.getElementById("effort-pill-btn")?.addEventListener("click", e => {
+  e.stopPropagation();
+  effortSection?.classList.toggle("open");
+});
+
+// Delegated: the .effort-option buttons are regenerated per tier by
+// syncEffortUI() (each tier has its own set of levels), so they can't be
+// bound individually once at load time.
+document.getElementById("effort-list-inner")?.addEventListener("click", e => {
+  e.stopPropagation();
+  const target = e.target instanceof Element ? e.target : null;
+  const btn = target?.closest<HTMLElement>(".effort-option");
+  if (!btn) return;
+  const cfg = TIER_EFFORTS[currentTier];
+  if (!cfg) return;
+  const level = btn.dataset.effort ?? "";
+  if (level !== "intelligent" && !cfg.levels.includes(level)) return;
+  currentEffort = level;
+  document.querySelectorAll<HTMLElement>(".effort-option").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  elementById("effort-pill-btn-value").textContent = EFFORT_LABELS[currentEffort] ?? "Padrão";
+  localStorage.setItem((ACCOUNT_SCOPE ? "boreas_last_effort_" + ACCOUNT_SCOPE + "_" : "boreas_last_effort_unauthed_") + currentTier, currentEffort);
+  effortSection?.classList.remove("open");
+  saveCurrentMessages();
+});
+
+const speedDescEl = elementById("speed-desc");
+const speedDescriptions: Record<string, string> = {
+  fastest: "Responde rapidamente, mas consome até 3x mais tokens.",
+  cheapest: "Economiza seu uso, mas é mais lento.",
+};
+
+function updateImageAttach() {
+  const camCard = elementById("asheet-camera");
+  const photoCard = elementById("asheet-photos");
+  // NO_VISION_TIERS não bloqueia mais o anexo: o back-end sempre aplica o
+  // fallback de visão (descrição via Gemma) pra esses tiers, então o anexo
+  // funciona igual - só não é vision nativa.
+  camCard.classList.remove("disabled");
+  photoCard.classList.remove("disabled");
+  camCard.title = photoCard.title = "";
+}
+
+elementById("lock-upgrade-btn").addEventListener("click", () => {
+  const requested = elementById("lock-upgrade-btn").dataset.switchTo ?? "";
+  const switchTo = Object.hasOwn(TIERS, requested) ? requested : "horizon2";
+  currentTier = switchTo;
+  currentSpeed = TIER_SPEEDS[currentTier];
+  currentEffort = EFFORT_TIERS.includes(currentTier) ? lastEffortFor(currentTier) : "default";
+  modelLabel.textContent = TIERS[currentTier].label;
+  document.querySelectorAll<HTMLElement>(".model-option").forEach(o =>
+    o.classList.toggle("active", o.dataset.tier === currentTier)
+  );
+  syncEffortUI();
+  lockBar.classList.remove("show");
+  if (inputRow) inputRow.style.display = "";
+  sendBtn.disabled = false;
+  updateImageAttach();
+});
+
+function setSpeed(btn: HTMLElement): void {
+  const speed = btn.dataset.speed;
+  if (!speed || !Object.values(TIER_SPEEDS).includes(speed)) return;
+  currentSpeed = speed;
+  document.querySelectorAll<HTMLElement>(".speed-opt").forEach(b => b.classList.remove("active"));
+  void btn.offsetWidth;
+  btn.classList.add("active");
+  speedDescEl.textContent = speedDescriptions[currentSpeed] ?? "";
+  saveCurrentMessages();
+}
+
+document.querySelectorAll<HTMLElement>(".speed-opt").forEach(btn => {
+  btn.addEventListener("click", e => { e.stopPropagation(); setSpeed(btn); });
+});
+
+var messagesEl = elementById<HTMLDivElement>("messages");
+const scrollBottomButton = elementById<HTMLButtonElement>("scroll-bottom-btn");
+
+let autoScroll = true;
+let _scrollFrame = 0;
+function updateScrollBtn() {
+  const hasScrollableMessages = messagesEl.querySelector(".msg-row")
+    && messagesEl.scrollHeight > messagesEl.clientHeight + 4;
+  const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  const awayFromLatest = Boolean(hasScrollableMessages && distance > 80);
+  scrollBottomButton.classList.toggle("show", awayFromLatest);
+}
+messagesEl.addEventListener("scroll", () => {
+  const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  autoScroll = dist < 4;
+  updateScrollBtn();
+});
+scrollBottomButton.addEventListener("click", () => scrollToBottom(true));
+
+// O botão de "ir para o final" é position:absolute com um bottom fixo em
+// CSS (var(--composer-clearance), com fallback pra 84px). .input-row e
+// #image-preview-wrap ficam no fluxo normal do documento (não são
+// fixed/absolute), então a altura real do composer varia - textarea
+// multi-linha, preview de anexos - sem nenhum aviso pro botão. Sem isso,
+// o composer crescia por cima da posição fixa do botão, que passava a
+// flutuar sobre as mensagens em vez de ficar colado acima da barra de
+// escrever.
+(function observeComposerHeight() {
+  const composerRow = elementBySelector<HTMLDivElement>(".input-row");
+  const previewWrap = elementById("image-preview-wrap");
+  if (typeof ResizeObserver === "undefined") return;
+
+  const BASE_CLEARANCE = 84; // mesmo valor que já era o fallback fixo em CSS
+  const GAP_ABOVE_INPUT = 8; // espaço extra entre o botão e o topo do composer
+
+  function updateComposerClearance() {
+    const inputRowHeight = composerRow.getBoundingClientRect().height || 0;
+    const inputRowMarginBottom = parseFloat(getComputedStyle(composerRow).marginBottom) || 0;
+    const previewVisible = previewWrap.classList.contains("show");
+    const previewHeight = previewVisible ? previewWrap.getBoundingClientRect().height : 0;
+    const previewMarginBottom = previewVisible ? (parseFloat(getComputedStyle(previewWrap).marginBottom) || 0) : 0;
+    // input-row e o preview não incluem sua própria margem inferior em
+    // getBoundingClientRect (a do input-row usa max(20px,
+    // env(safe-area-inset-bottom)), variável por device) - soma-se
+    // manualmente, junto com uma folga fixa acima de tudo.
+    const clearance = Math.max(BASE_CLEARANCE, inputRowHeight + inputRowMarginBottom + previewHeight + previewMarginBottom + GAP_ABOVE_INPUT);
+    document.documentElement.style.setProperty("--composer-clearance", `${Math.round(clearance)}px`);
+  }
+
+  const ro = new ResizeObserver(updateComposerClearance);
+  ro.observe(composerRow);
+  ro.observe(previewWrap);
+  updateComposerClearance();
+})();
+
+function scrollToBottom(force = false): void {
+  if (force) autoScroll = true;
+  updateScrollBtn();
+  if (!autoScroll || _scrollFrame) return;
+
+  // Streaming can call this function several times per network chunk. Keep
+  // one write per frame so reading scrollHeight and updating scrollTop do not
+  // force repeated layout passes while the answer is being rendered - this
+  // throttle also matters for the smooth scroll below: calling scrollTo
+  // with behavior:"smooth" on every chunk would restart the animation each
+  // time and look jittery instead of smooth, so at most one scroll call
+  // per animation frame is allowed through.
+  _scrollFrame = requestAnimationFrame(() => {
+    _scrollFrame = 0;
+    if (autoScroll) messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: "smooth" });
+    updateScrollBtn();
+  });
+}
+var msgInput = elementById<HTMLTextAreaElement>("msg-input");
+var sendBtn = elementById<HTMLButtonElement>("send-btn");
+
+msgInput.focus();
+
+function inputMaxHeight() {
+  return Math.round(window.innerHeight * 0.25);
+}
+
+let _shrinkTimer: ReturnType<typeof setTimeout> | null = null;
+let _collapsedWidth = null;
+
+const _radiusMirror = document.createElement("div");
+_radiusMirror.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;top:-9999px;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;";
+document.body.appendChild(_radiusMirror);
+
+function getCollapsedWidth() {
+  const row = document.querySelector(".input-row");
+  if (!row) return msgInput.clientWidth;
+
+  if (!row.classList.contains("expanded")) {
+    _collapsedWidth = msgInput.clientWidth;
+    return _collapsedWidth;
+  }
+
+  // We're in the expanded state, exactly when updateInputRadius() needs to
+  // measure "how wide would the collapsed box be" to decide whether it can
+  // shrink. Removes the class, measures for real, restores it, all
+  // synchronously, so the browser never paints the intermediate state.
+  row.classList.remove("expanded");
+  const w = msgInput.clientWidth;
+  row.classList.add("expanded");
+  _collapsedWidth = w;
+  return w;
+}
+window.addEventListener("resize", () => { _collapsedWidth = null; });
+
+function applyInputShape(isExpanded: boolean): void {
+  const row = elementBySelector<HTMLDivElement>(".input-row");
+  if (row.classList.contains("expanded") === isExpanded) return;
+  row.style.borderRadius = isExpanded ? "18px" : "999px";
+  row.classList.toggle("expanded", isExpanded);
+
+  void row.offsetWidth;
+}
+
+function updateInputRadius() {
+  const cs = getComputedStyle(msgInput);
+  const lineHeight = parseFloat(cs.lineHeight) || 22;
+  const paddingV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const oneLineHeight = lineHeight + paddingV;
+
+  _radiusMirror.style.fontFamily = cs.fontFamily;
+  _radiusMirror.style.fontSize   = cs.fontSize;
+  _radiusMirror.style.lineHeight = cs.lineHeight;
+  _radiusMirror.style.padding    = cs.padding;
+  _radiusMirror.style.width      = getCollapsedWidth() + "px";
+  _radiusMirror.textContent      = msgInput.value + "\u200b"; // preserva quebra em \n no final
+
+  const h = _radiusMirror.scrollHeight;
+
+  const shouldExpand = h > oneLineHeight + 1; // +1px de tolerância pra rounding
+
+  if (shouldExpand) {
+    if (_shrinkTimer) { clearTimeout(_shrinkTimer); _shrinkTimer = null; }
+    applyInputShape(true);
+  } else if (_shrinkTimer === null) {
+    _shrinkTimer = setTimeout(() => {
+      _shrinkTimer = null;
+      _radiusMirror.style.width = getCollapsedWidth() + "px";
+      _radiusMirror.textContent = msgInput.value + "\u200b";
+      if (_radiusMirror.scrollHeight <= oneLineHeight + 1) applyInputShape(false);
+    }, 180);
+  }
+}
+
+// Enables the textarea's scroll only once the text exceeds the max height.
+function syncInputOverflow() {
+  const maxH = inputMaxHeight();
+  msgInput.style.overflowY = msgInput.scrollHeight > maxH ? "auto" : "hidden";
+}
+
+msgInput.addEventListener("input", () => {
+  if (!loading) sendBtn.disabled = !msgInput.value.trim() && !pendingImages.length && !pendingFile;
+  // Decide expanded/collapsed shape BEFORE sizing height off scrollHeight.
+  // .expanded changes the row's padding/flex layout, which changes the
+  // textarea's own box - measuring height first (against the old shape's
+  // geometry) is what produced the transient "oval with squashed text"
+  // frame when a keystroke crossed the 1-line -> 2-line threshold.
+  updateInputRadius();
+  msgInput.style.height = "auto";
+  msgInput.style.height = Math.min(msgInput.scrollHeight, inputMaxHeight()) + "px";
+  syncInputOverflow();
+});
+
+window.addEventListener("resize", () => {
+  msgInput.style.height = "auto";
+  msgInput.style.height = Math.min(msgInput.scrollHeight, inputMaxHeight()) + "px";
+  syncInputOverflow();
+});
+
+const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+const PLUGINS: Array<{ id: string; label: string; desc: string; enabled: boolean; icon: string }> = [
+  {
+    id: "web_search", label: "Busca na Web", desc: "Sugere ao modelo pesquisar na web antes de responder",
+    enabled: true,
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+  },
+  {
+    id: "deep_thinking", label: "Pensamento Aprofundado", desc: "Raciocínio no esforço máximo só nesta mensagem",
+    enabled: true,
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.05V17h6v-.25c0-.85.4-1.55 1-2.05A7 7 0 0 0 12 2Z"/></svg>`,
+  },
+  {
+    id: "deep_research", label: "Pesquisa Aprofundada", desc: "Plano de pesquisa em etapas, com barra de progresso",
+    enabled: true,
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a2 2 0 0 1 2-2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 2v5h5M9 13h6M9 17h6"/></svg>`,
+  },
+  {
+    id: "study", label: "Estudar e Aprender", desc: "Explica passo a passo e pode gerar flashcards",
+    enabled: true,
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5"/></svg>`,
+  },
+  {
+    id: "agentic_loop", label: "Loop Agêntico", desc: "Executa um /Objetivo em etapas até 100%",
+    enabled: true,
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>`,
+  },
+];
+
+let activePlugin: string | null = null;   // id do plugin ativo pra próxima mensagem enviada
+let mentionStart = -1;     // índice do "@" que abriu o pop-up atual
+let mentionActiveIndex = 0;
+
+const mentionPopup      = elementById("mention-popup");
+const mentionPopupInner = elementById("mention-popup-inner");
+const pluginPill        = elementById("plugin-pill");
+const pluginPillLabel   = elementById("plugin-pill-label");
+const pluginPillRemove  = elementById<HTMLButtonElement>("plugin-pill-remove");
+
+// Recalculates the popup's position when the visual viewport changes with the keyboard.
+function viewportHeight() {
+  return window.visualViewport?.height ?? window.innerHeight;
+}
+function positionMentionPopup() {
+  const rect = elementBySelector(".input-row").getBoundingClientRect();
+  const vh = viewportHeight();
+  mentionPopup.style.left   = rect.left + "px";
+  mentionPopup.style.width  = rect.width + "px";
+  // Clamped so bottom never goes negative (which would push the popup
+  // outside the visible area, behind the keyboard). If rect.top is already
+  // past the visual viewport (input hidden behind the keyboard), pins the
+  // popup flush against the visible bottom edge instead of overshooting.
+  const bottom = Math.max(8, vh - rect.top + 8);
+  mentionPopup.style.bottom = bottom + "px";
+}
+
+function renderMentionPopup() {
+  mentionActiveIndex = 0;
+  mentionPopupInner.replaceChildren(...PLUGINS.map((p, i) => {
+    const option = document.createElement("div");
+    option.className = `mention-option${p.enabled ? "" : " disabled"}${i === 0 ? " active" : ""}`;
+    option.dataset.id = p.id;
+    const icon = document.createElement("div");
+    icon.className = "mention-option-icon";
+    icon.appendChild(createPluginIcon(p.icon));
+    const name = document.createElement("div");
+    name.className = "mention-option-name";
+    name.textContent = p.label;
+    option.append(icon, name);
+    if (!p.enabled) {
+      const soon = document.createElement("span");
+      soon.className = "mention-option-soon";
+      soon.textContent = "Em breve";
+      option.appendChild(soon);
+    }
+    return option;
+  }));
+  mentionPopupInner.querySelectorAll<HTMLElement>(".mention-option").forEach(el => {
+    el.addEventListener("click", () => selectPlugin(el.dataset.id ?? ""));
+  });
+}
+
+function createPluginIcon(rawIcon: string): SVGSVGElement {
+  const template = document.createElement("template");
+  const purifier = (globalThis as typeof globalThis & { DOMPurify?: { sanitize: (input: string, options: { USE_PROFILES: { svg: boolean } }) => string } }).DOMPurify;
+  template.innerHTML = purifier
+    ? purifier.sanitize(rawIcon, { USE_PROFILES: { svg: true } })
+    : "";
+  const svg = template.content.firstElementChild;
+  if (svg instanceof SVGSVGElement) return svg;
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  fallback.setAttribute("viewBox", "0 0 24 24");
+  return fallback;
+}
+
+function openMentionPopup() {
+  positionMentionPopup();
+  renderMentionPopup();
+  mentionPopup.classList.add("open");
+}
+
+function closeMentionPopup() {
+  mentionPopup.classList.remove("open");
+  mentionStart = -1;
+}
+
+function updatePluginPill() {
+  const plugin = PLUGINS.find(p => p.id === activePlugin);
+  if (!plugin) { pluginPill.classList.remove("show"); return; }
+  pluginPillLabel.textContent = plugin.label;
+  const oldIcon = document.getElementById("plugin-pill-icon");
+  const newIcon = createPluginIcon(plugin.icon);
+  newIcon.id = "plugin-pill-icon";
+  oldIcon?.replaceWith(newIcon);
+  pluginPill.classList.add("show");
+}
+
+function applyPluginMention(plugin: (typeof PLUGINS)[number]): number {
+  const val = msgInput.value;
+  let rest = val;
+  for (const p of PLUGINS) {
+    const pref = `@${p.label} `;
+    if (rest.startsWith(pref)) { rest = rest.slice(pref.length); break; }
+  }
+  const mention = `@${plugin.label} `;
+  msgInput.value = mention + rest;
+  activePlugin = plugin.id;
+  updatePluginPill();
+  msgInput.dispatchEvent(new Event("input"));
+  return mention.length;
+}
+
+function selectPlugin(id: string): void {
+  const plugin = PLUGINS.find(p => p.id === id);
+  if (!plugin || !plugin.enabled) return;
+  const val = msgInput.value;
+  const cursor = msgInput.selectionStart;
+  const before = val.slice(0, mentionStart);
+  const after  = val.slice(cursor);
+  msgInput.value = (before + after).replace(/^\s+/, "");
+  const mentionLen = applyPluginMention(plugin);
+  closeMentionPopup();
+  msgInput.focus();
+  msgInput.setSelectionRange(mentionLen, mentionLen);
+}
+
+function clearActivePlugin() {
+  activePlugin = null;
+  updatePluginPill();
+}
+
+const asheetPluginsRow  = elementById("asheet-plugins-row");
+const asheetPluginsList = elementById("asheet-plugins-list");
+
+function renderAsheetPluginsList() {
+  asheetPluginsList.replaceChildren(...PLUGINS.map(p => {
+    const option = document.createElement("div");
+    option.className = `asheet-plugin-option${p.enabled ? "" : " disabled"}`;
+    option.dataset.id = p.id;
+    const icon = document.createElement("div");
+    icon.className = "asheet-plugin-icon";
+    icon.appendChild(createPluginIcon(p.icon));
+    const info = document.createElement("div");
+    info.className = "asheet-plugin-info";
+    const name = document.createElement("div");
+    name.className = "asheet-plugin-name";
+    name.textContent = p.label;
+    const desc = document.createElement("div");
+    desc.className = "asheet-plugin-desc";
+    desc.textContent = p.desc;
+    info.append(name, desc);
+    option.append(icon, info);
+    if (!p.enabled) {
+      const soon = document.createElement("span");
+      soon.className = "asheet-plugin-soon";
+      soon.textContent = "Em breve";
+      option.appendChild(soon);
+    }
+    return option;
+  }));
+  asheetPluginsList.querySelectorAll<HTMLElement>(".asheet-plugin-option").forEach(el => {
+    el.addEventListener("click", () => {
+      const plugin = PLUGINS.find(p => p.id === el.dataset.id);
+      if (!plugin || !plugin.enabled) return;
+      applyPluginMention(plugin);
+      closeAttachSheet(); // minimiza a aba de anexar, como no @
+      msgInput.focus();
+    });
+  });
+}
+renderAsheetPluginsList();
+
+asheetPluginsRow.addEventListener("click", () => {
+  asheetPluginsRow.classList.toggle("open");
+  asheetPluginsList.classList.toggle("open");
+});
+
+pluginPillRemove.addEventListener("click", () => {
+  const plugin = PLUGINS.find(p => p.id === activePlugin);
+  if (plugin && msgInput.value.startsWith(`@${plugin.label} `)) {
+    msgInput.value = msgInput.value.slice(`@${plugin.label} `.length);
+    msgInput.dispatchEvent(new Event("input"));
+  }
+  clearActivePlugin();
+  msgInput.focus();
+});
+
+function detectMention() {
+
+  if (activePlugin) {
+    const plugin = PLUGINS.find(p => p.id === activePlugin);
+    if (plugin && !msgInput.value.startsWith(`@${plugin.label} `)) clearActivePlugin();
+  }
+
+  const val = msgInput.value;
+  const cursor = msgInput.selectionStart;
+  let at = -1;
+  for (let i = cursor - 1; i >= 0; i--) {
+    const ch = val[i];
+    if (ch === "@") { at = i; break; }
+    if (ch === " " || ch === "\n") break;
+  }
+  if (at === -1) { closeMentionPopup(); return; }
+  mentionStart = at;
+  openMentionPopup();
+}
+
+document.addEventListener("click", e => {
+  const target = e.target;
+  if (!(target instanceof Node) || (!mentionPopup.contains(target) && target !== msgInput)) closeMentionPopup();
+});
+
+msgInput.addEventListener("input", detectMention);
+window.addEventListener("resize", () => { if (mentionPopup.classList.contains("open")) positionMentionPopup(); });
+// Recalculates the popup's position when the visual viewport changes with the keyboard.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => { if (mentionPopup.classList.contains("open")) positionMentionPopup(); });
+  window.visualViewport.addEventListener("scroll", () => { if (mentionPopup.classList.contains("open")) positionMentionPopup(); });
+}
+
+msgInput.addEventListener("keydown", e => {
+  if (mentionPopup.classList.contains("open")) {
+    const options = [...mentionPopupInner.querySelectorAll<HTMLElement>(".mention-option")];
+    if (e.key === "Escape") { e.preventDefault(); closeMentionPopup(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (!options.length) return;
+      e.preventDefault();
+      options[mentionActiveIndex]?.classList.remove("active");
+      mentionActiveIndex = e.key === "ArrowDown"
+        ? (mentionActiveIndex + 1) % options.length
+        : (mentionActiveIndex - 1 + options.length) % options.length;
+      options[mentionActiveIndex]?.classList.add("active");
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopImmediatePropagation(); // não deixa o listener de "enviar" abaixo disparar send()
+      const el = options[mentionActiveIndex];
+      if (el) selectPlugin(el.dataset.id ?? "");
+      return;
+    }
+  }
+});
+
+msgInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !isMobile) {
+    e.preventDefault(); if (!sendBtn.disabled) send();
+  }
+});
+
+(function() {
+  var observedInput = elementById<HTMLTextAreaElement>('msg-input');
+
+  // Placeholder changes after the first message.
+  var placeholderChanged = false;
+  var observer = new MutationObserver(function(mutations) {
+    // Clearing a chat can leave the old scrollTop behind. Keep the empty
+    // state pinned to the top so reopening/starting a chat cannot animate the
+    // header or reveal a phantom scroll range.
+    if (!messagesEl.querySelector('.msg-row')) {
+      messagesEl.scrollTop = 0;
+      autoScroll = true;
+      updateScrollBtn();
+    }
+    if (placeholderChanged) return;
+    for (var m of mutations) {
+      for (var node of m.addedNodes) {
+        if (node instanceof Element && node.classList.contains('msg-row')) {
+          if (node.classList.contains('user')) {
+            observedInput.placeholder = 'Continue explorando o infinito...';
+            placeholderChanged = true;
+            return;
+          }
+        }
+      }
+    }
+  });
+  var observedMessages = elementById<HTMLDivElement>('messages');
+  observer.observe(observedMessages, { childList: true, subtree: true });
+
+  // Adds the share button to message actions.
+  var shareObs = new MutationObserver(function(mutations) {
+    for (var m of mutations) {
+      for (var node of m.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        var actions: HTMLElement[] = node.classList.contains('msg-actions')
+          ? [node as HTMLElement]
+          : Array.from(node.querySelectorAll<HTMLElement>('.msg-actions'));
+        actions.forEach(function(actionsEl: HTMLElement) {
+          if (actionsEl.querySelector('.share-btn')) return;
+          var btn = document.createElement('button');
+          btn.className = 'msg-action-btn share-btn';
+          btn.title = 'Compartilhar';
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>';
+          btn.addEventListener('click', function() {
+            // The share button can sit in a row with several bubbles (tool
+            // result cards, multiple text segments after a tool round) -
+            // joins every bubble's real text (falls back to visible text if
+            // _rawText wasn't set on that particular bubble) instead of
+            // grabbing only the first one and silently dropping the rest.
+            var col = actionsEl.closest('.bot-col');
+            var bubbles = col ? Array.from(col.querySelectorAll<HTMLElement & { _rawText?: string }>('.bubble.bot')) : [];
+            var text = bubbles.map(function(b) { return b._rawText ?? b.textContent ?? ''; })
+              .filter(Boolean).join('\n\n').trim();
+            if (!text) { if (typeof showToast === 'function') showToast('Nada para compartilhar ainda.'); return; }
+
+            var now = new Date();
+            var time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            var date = now.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' });
+            var formatted = 'Resposta gerada pelo Boreas às ' + time + ' de ' + date + ':\n\n' +
+              '"' + text + '"\n\n' +
+              'Nota: O Boreas é uma IA e pode cometer erros. Verifique as respostas.';
+
+            if (navigator.share) {
+              navigator.share({ text: formatted }).catch(function(err: unknown) {
+                // AbortError just means the user closed the native share
+                // sheet - not a failure worth falling back for.
+                if (typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError') return;
+                if (typeof copyText === 'function') copyText(formatted, btn);
+                if (typeof showToast === 'function') showToast('Não foi possível compartilhar - copiado para a área de transferência.');
+              });
+            } else if (typeof copyText === 'function') {
+              // No Web Share API at all (most desktop browsers): copying is
+              // the closest equivalent to a dead button.
+              copyText(formatted, btn);
+              if (typeof showToast === 'function') showToast('Copiado para a área de transferência.');
+            }
+          });
+          actionsEl.appendChild(btn);
+        });
+      }
+    }
+  });
+  shareObs.observe(observedMessages, { childList: true, subtree: true });
+})();
+
+export {};

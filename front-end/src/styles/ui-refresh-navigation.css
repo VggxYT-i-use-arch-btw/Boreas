@@ -1,0 +1,54 @@
+/* Sidebar: a stable utility rail with dividers instead of floating panels. */
+#sidebar { width: min(286px, 88vw); padding: 0 8px; background: var(--bg-elev); border-right-color: var(--border); box-shadow: none; }
+.sidebar-header { padding: 15px 10px 13px; }
+.sidebar-logo-name { font-size: 19px; font-weight: 650; }
+.sidebar-plan-badge { border-radius: 5px; background: var(--accent-soft); border-color: rgba(82,179,191,.38); }
+.sidebar-close-btn, .sidebar-settings-btn { border-radius: 8px; background: transparent; }
+.sidebar-actions { padding: 12px 0 11px; }
+.sidebar-new-chat, .sidebar-projeto { min-height: 38px; border-radius: 8px; padding: 9px 10px; }
+.sidebar-new-chat { background: var(--accent-soft); border-color: rgba(82,179,191,.35); }
+.sidebar-new-chat:hover { background: rgba(47,143,157,.24); border-color: rgba(82,179,191,.5); }
+.sidebar-projeto { background: transparent; }
+.sidebar-new-chat svg, .sidebar-projeto svg { width: 16px; height: 16px; }
+.sidebar-section-label { padding: 16px 10px 7px; font-size: 11px; }
+.sidebar-section-label { color: var(--text-faint); letter-spacing: .04em; }
+.sidebar-search { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: transparent; }
+#sidebar-chat-list { padding-inline: 0; }
+#sidebar-chat-list { gap: 2px; }
+.sidebar-chat-item { padding: 9px 10px; border-radius: 8px; transition: background-color .16s ease-out, border-color .16s ease-out, box-shadow .16s ease-out; }
+.sidebar-chat-item:hover { background: var(--surface); border-color: transparent; box-shadow: none; }
+.sidebar-chat-item.active { background: var(--accent-soft); border-color: rgba(82,179,191,.34); box-shadow: inset 2px 0 0 var(--accent-strong); }
+.sidebar-chat-title { font-size: 13px; font-weight: 500; }
+.sidebar-chat-meta { font-size: 11px; }
+.sidebar-empty-msg { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 14px; color: var(--text-faint); font-size: 12px; text-align: center; }
+.sidebar-empty-msg > .ph { color: var(--text-ghost); font-size: 22px; }
+.sidebar-empty-msg .ui-skeleton-line { width: 72%; }
+.sidebar-chat-meta, .usage-card-value, .usage-visual-value, time, [data-timestamp] { font-family: var(--mono-font); font-variant-numeric: tabular-nums; }
+.sidebar-footer { margin: 0; padding: 11px 10px max(12px, env(safe-area-inset-bottom)); }
+.sidebar-avatar { width: 32px; height: 32px; border-width: 1px; background: var(--surface); }
+.sidebar-avatar, .settings-avatar-lg { border: 1px solid var(--border); background: var(--surface); }
+
+/* Settings, usage, and form hierarchy. */
+#settings-overlay { background: rgba(4,5,10,.82); }
+.settings-views { width: min(720px, calc(100% - 32px)); height: min(820px, calc(100% - 32px)); border-radius: 12px; background: var(--bg-elev); box-shadow: 0 1px 2px rgba(0,0,0,.28); }
+.settings-view, #settings-overlay .settings-view, #settings-overlay .settings-header { background: var(--bg-elev); }
+.settings-header { padding: 18px 22px 14px; }
+.settings-title { font-size: 18px; font-weight: 650; }
+.settings-close, .settings-back { width: 32px; height: 32px; border-radius: 8px; background: transparent; line-height: 0; }
+.settings-close .ph { font-size: 16px; }
+.settings-body { padding: 16px 22px 26px; gap: 7px; }
+.settings-profile-card, .settings-menu-group, .settings-row, .settings-connectors-intro, .settings-privacy-text, .settings-connectors-empty { border-radius: 8px; background: var(--surface); box-shadow: none; }
+.settings-profile-card { padding: 14px; background: transparent; }
+.settings-section-label { padding: 19px 3px 7px; font-size: 12px; font-weight: 600; }
+.settings-section-label:first-of-type { padding-top: 10px; }
+.settings-menu-item { min-height: 44px; padding: 10px 12px; border-bottom: 0; }
+.settings-menu-item + .settings-menu-item { border-top: 1px solid var(--border-soft); }
+.settings-row { padding: 12px; }
+.settings-field-label { margin-top: 13px; margin-bottom: 5px; color: var(--text-dim); font-size: 12px; font-weight: 600; }
+.settings-field-hint { margin: -1px 0 6px; color: var(--text-faint); font-size: 12px; line-height: 1.45; }
+.settings-input, .settings-textarea, #rename-input { border-radius: 8px; background: transparent; border-color: var(--border); }
+.settings-input:focus, .settings-textarea:focus, #rename-input:focus { border-color: var(--accent-strong); box-shadow: 0 0 0 3px rgba(47,143,157,.11); }
+.settings-security-note { border-color: rgba(82,179,191,.28); background: var(--accent-soft); }
+.settings-save-btn { border-radius: 8px; background: var(--accent); box-shadow: none; }
+.toggle-switch.on { background: var(--accent); }
+.settings-logout-btn { border-radius: 8px; }

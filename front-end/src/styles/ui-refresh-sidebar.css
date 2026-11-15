@@ -1,0 +1,28 @@
+/* Sidebar */
+#sidebar-overlay { background: rgba(1,2,6,.72); }
+#sidebar { width: min(330px, 88vw); padding: 10px; background: rgba(13,16,24,.98); border-right: 1px solid var(--border); box-shadow: 24px 0 70px rgba(0,0,0,.24); }
+.sidebar-header { padding: 17px 12px 15px; border-bottom: 1px solid var(--border-soft); }
+.sidebar-logo { gap: 8px; }
+.sidebar-logo-name { font-size: 21px; letter-spacing: -.04em; }
+.sidebar-plan-badge { padding: 3px 8px; border: 1px solid rgba(82,179,191,.55); border-radius: 7px; background: rgba(47,143,157,.15); color: var(--accent-strong); font-size: 10px; font-weight: 800; }
+.sidebar-close-btn { border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface); }
+.sidebar-actions { padding: 14px 2px 12px; border-bottom: 1px solid var(--border-soft); }
+.sidebar-new-chat, .sidebar-projeto { min-height: 45px; padding: 11px 13px; border: 1px solid transparent; border-radius: 13px; font-size: 13px; }
+.sidebar-new-chat { color: var(--accent-strong); border-color: rgba(47,143,157,.55); background: rgba(47,143,157,.10); }
+.sidebar-new-chat:hover { background: rgba(47,143,157,.18); }
+.sidebar-projeto { margin-top: 4px; color: var(--text-dim); background: var(--surface); }
+.sidebar-projeto:hover { color: var(--text); background: var(--hover); }
+.sidebar-section-label { padding: 17px 5px 7px; font-size: 10px; letter-spacing: .06em; color: var(--text-ghost); }
+.sidebar-search { display: flex; align-items: center; gap: 9px; margin: 0 2px 8px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 13px; color: var(--text-faint); background: var(--surface); }
+.sidebar-search:focus-within { border-color: rgba(82,179,191,.45); color: var(--text-dim); }
+.sidebar-search input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 12px; }
+.sidebar-search input::placeholder { color: var(--text-ghost); }
+#sidebar-chat-list { padding: 3px 2px 16px; gap: 5px; }
+.sidebar-chat-item { padding: 12px 11px; border: 1px solid transparent; border-radius: 15px; }
+.sidebar-chat-item:hover, .sidebar-chat-item.active { background: var(--surface); border-color: var(--border-soft); }
+.sidebar-chat-title { font-size: 12px; font-weight: 700; }
+.sidebar-chat-meta { margin-top: 4px; color: var(--text-faint); font-size: 10px; }
+.sidebar-footer { margin: 0 2px; padding: 13px 4px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border-soft); }
+.sidebar-avatar { width: 38px; height: 38px; background: linear-gradient(var(--bg),var(--bg)) padding-box, linear-gradient(135deg,#2f8f9d,#52b3bf) border-box; }
+.sidebar-user-name { font-size: 12px; }
+.sidebar-settings-btn { border: 1px solid var(--border-soft); border-radius: 11px; background: var(--surface); }

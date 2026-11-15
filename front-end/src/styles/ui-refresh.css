@@ -1,0 +1,102 @@
+/* Boreas UI refresh: visual layer only. The existing JS contracts remain intact. */
+
+
+
+html, body { background: var(--bg); overflow: hidden; touch-action: manipulation; overscroll-behavior: none; }
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  font-family: var(--user-font);
+  letter-spacing: -.012em;
+  overflow-x: hidden;
+  background:
+    radial-gradient(900px 600px at 88% -10%, rgba(30, 90, 100, .13), transparent 65%),
+    radial-gradient(700px 500px at 0% 100%, rgba(20, 70, 80, .09), transparent 62%),
+    var(--bg);
+}
+
+button, input, textarea { font-family: inherit; }
+button { transition: transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease, opacity .18s ease; }
+button:active { transform: scale(.97); }
+
+/* Loading and onboarding */
+#loading-screen {
+  background: #06070b;
+  gap: 22px;
+}
+#loading-screen::after {
+  content: "";
+  position: absolute;
+  width: min(70vw, 520px);
+  height: min(70vw, 520px);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(47, 143, 157, .18), transparent 68%);
+  pointer-events: none;
+}
+.loading-logo { position: relative; z-index: 1; width: 68px; height: 68px; }
+.loading-bar-wrap { position: relative; z-index: 1; width: 150px; height: 3px; background: rgba(255,255,255,.1); }
+.loading-bar { background: linear-gradient(90deg, #2f8f9d, #6cc6d1); }
+
+#onboard-screen {
+  isolation: isolate;
+  background:
+    radial-gradient(650px 500px at 50% 20%, rgba(30, 100, 112, .22), transparent 70%),
+    radial-gradient(500px 420px at 15% 85%, rgba(33, 120, 151, .13), transparent 72%),
+    #07080d;
+  padding: clamp(28px, 6vw, 80px) 22px max(30px, env(safe-area-inset-bottom));
+}
+#onboard-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: .22;
+  background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, black, transparent 85%);
+}
+.ob-logo-wrap { margin-bottom: 28px; }
+.ob-logo-img { width: clamp(86px, 15vw, 124px); height: clamp(86px, 15vw, 124px); filter: drop-shadow(0 18px 34px rgba(47,143,157,.3)); }
+.ob-tagline { width: min(100%, 650px); max-width: 650px; min-height: 66px; padding: 0 8px; font-size: clamp(24px, 4vw, 42px); line-height: 1.15; letter-spacing: -.045em; font-weight: 700; overflow-wrap: anywhere; text-wrap: balance; }
+.ob-actions { position: absolute; bottom: max(34px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; gap: 10px; width: min(440px, calc(100% - 44px)); }
+.ob-actions { right: auto; }
+.ob-open-btn { position: static; flex: 1; padding: 15px 18px; border-radius: 15px; font-size: 14px; font-weight: 700; }
+.ob-login-btn { color: var(--text); background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); }
+.ob-login-btn:hover { background: rgba(255,255,255,.14); }
+.ob-register-btn { color: #fff; background: linear-gradient(135deg, #2f8f9d, #52b3bf); border: 1px solid rgba(255,255,255,.16); box-shadow: 0 12px 28px rgba(47,143,157,.3); }
+.ob-register-btn:hover { filter: brightness(1.08); }
+
+#ob-form-sheet {
+  width: min(470px, calc(100% - 32px));
+  left: 50%; right: auto; bottom: 24px;
+  transform: translate(-50%, calc(100% + 40px));
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  padding: 12px 24px 24px;
+  background: rgba(16, 18, 27, .94);
+  box-shadow: var(--shadow-lg);
+}
+#ob-form-sheet, #ob-form-sheet * { box-sizing: border-box; }
+#ob-form-sheet.open { transform: translate(-50%, 0); }
+#onboard-screen:has(#ob-form-sheet.open)::after { content: ""; position: absolute; inset: 0; z-index: 1; background: rgba(3,4,9,.62); pointer-events: none; }
+#ob-form-sheet { z-index: 3; }
+.ob-form-handle { width: 42px; height: 4px; margin: 0 auto 18px; background: rgba(255,255,255,.18); }
+.ob-form-topline { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+.ob-form-back { width: 32px; height: 32px; border-radius: 10px; color: var(--text-dim); background: var(--surface); font-size: 20px; }
+.ob-form-back:hover { color: var(--text); background: var(--hover); }
+.ob-form-kicker { color: var(--accent-text); font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.ob-form-step { color: var(--text-ghost); font-size: 11px; font-weight: 700; }
+.ob-form-title { margin: 0 0 7px; text-align: left; font-size: 25px; letter-spacing: -.04em; }
+.ob-form-subtitle { margin-bottom: 20px; color: var(--text-faint); font-size: 13px; }
+.ob-input { margin-bottom: 10px; padding: 14px 15px; background: rgba(255,255,255,.055); border: 1px solid var(--border-soft); border-radius: 13px; font-size: 14px; }
+.ob-input:focus { border-color: rgba(82,179,191,.75); background: rgba(47,143,157,.08); box-shadow: 0 0 0 4px rgba(47,143,157,.1); }
+.ob-input::placeholder { color: var(--text-ghost); }
+.ob-checkbox-row { margin: 5px 0 11px; }
+.ob-checkbox { border-color: rgba(255,255,255,.25); }
+.ob-checkbox.checked { background: var(--accent-strong); border-color: var(--accent-strong); }
+.ob-checkbox-label { color: var(--text-faint); }
+.ob-error { min-height: 20px; color: #ff8d9c; font-size: 12px; }
+.ob-submit { margin-top: 5px; padding: 14px 16px; border-radius: 13px; background: linear-gradient(135deg, #2f8f9d, #52b3bf); color: #fff; font-size: 14px; font-weight: 800; box-shadow: 0 10px 24px rgba(47,143,157,.24); }
+.ob-submit:hover { filter: brightness(1.08); }
+.ob-switch-mode { width: 100%; padding: 13px 8px 3px; color: var(--accent-text); font-size: 12px; font-weight: 700; }
+.ob-switch-mode:hover { color: #d2c6ff; }
+.ob-register-fields.is-hidden { display: none !important; }

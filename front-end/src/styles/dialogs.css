@@ -1,0 +1,59 @@
+/* Memory popup */
+.memory-info-popup{position:fixed;z-index:300;background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:16px 18px;max-width:260px;width:88%;box-shadow:0 12px 40px rgba(0,0,0,.85);animation:fadeUp .18s ease both}
+.memory-popup-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px}
+.memory-popup-desc{font-size:11px;color:var(--text-faint);line-height:1.55}
+.memory-popup-status{font-size:11px;color:var(--text-faint);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+.memory-popup-status strong{color:var(--text-dim)}
+
+/* Coming soon */
+#coming-soon-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+#coming-soon-overlay.show{opacity:1;pointer-events:auto}
+.coming-soon-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:22px;padding:32px 28px 24px;text-align:center;max-width:270px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.9);animation:fadeUp .2s ease both}
+.coming-soon-emoji{font-size:38px;margin-bottom:12px}
+.coming-soon-title{font-size:17px;font-weight:700;color:var(--text);margin-bottom:6px}
+.coming-soon-desc{font-size:13px;color:var(--text-faint);margin-bottom:20px;line-height:1.5}
+.coming-soon-btn{width:100%;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--text-dim);font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.coming-soon-btn:hover{background:var(--hover)}
+
+/* Rename dialog */
+#rename-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+#rename-overlay.show{opacity:1;pointer-events:auto}
+.rename-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:20px;padding:24px;max-width:300px;width:90%;animation:fadeUp .2s ease both}
+#resume-overlay{position:fixed;inset:0;z-index:301;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+#resume-overlay.show{opacity:1;pointer-events:auto}
+.resume-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:20px;padding:30px 24px;max-width:280px;width:90%;text-align:center;animation:fadeUp .2s ease both}
+.resume-status-text{margin-top:16px;font-size:13px;color:var(--text-faint)}
+#resume-processing .typing-dots{justify-content:center}
+.resume-result-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px}
+.resume-result-desc{font-size:13px;color:var(--text-faint);margin-bottom:18px;line-height:1.5}
+.resume-result-btn{width:100%;padding:11px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:10px;color:var(--accent-text);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;font-family:inherit}
+.resume-result-btn:hover{background:rgba(99,102,241,.25)}
+.rename-modal-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px}
+#rename-input{width:100%;padding:12px 14px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;outline:none;box-sizing:border-box;transition:border-color .2s;font-family:inherit}
+#rename-input:focus{border-color:rgba(99,102,241,.45)}
+.rename-btns{display:flex;gap:8px;margin-top:14px}
+#rename-cancel{flex:1;padding:11px;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text-faint);font-size:13px;cursor:pointer;font-family:inherit}
+#rename-confirm{flex:1;padding:11px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:10px;color:var(--accent-text);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;font-family:inherit}
+#rename-confirm:hover{background:rgba(99,102,241,.25)}
+
+/* Thinking sheet */
+#thinking-sheet{display:none;position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--bg-elev);border-top:1px solid var(--border);border-radius:28px 28px 0 0;padding:0 0 env(safe-area-inset-bottom,12px);transform:translateY(100%);transition:transform .3s cubic-bezier(.32,.72,0,1),height .3s}
+#thinking-sheet.open{display:flex;flex-direction:column;transform:translateY(0);height:38vh}
+#thinking-sheet.open.full{height:86vh}
+.sheet-handle{width:36px;height:4px;background:var(--hover);border-radius:2px;margin:10px auto 0;flex-shrink:0;cursor:pointer}
+.sheet-header{display:grid;grid-template-columns:40px 1fr 40px;align-items:center;padding:12px 20px 8px;flex-shrink:0}
+.sheet-title{text-align:center;font-size:17px;font-weight:700;color:var(--text);letter-spacing:0}
+.sheet-close{display:grid;place-items:center;width:30px;height:30px;color:var(--text);padding:0;cursor:pointer;background:none;border:none}
+.sheet-header-spacer{width:30px;height:30px}
+.sheet-body{flex:1;overflow-y:auto;padding:10px 28px 20px 52px;font-size:15px;color:var(--text-faint);line-height:1.65;white-space:pre-wrap;word-break:break-word;border-left:1px solid rgba(255,255,255,.14);margin:0 28px 0 31px}
+.sheet-expand-hint{text-align:center;padding:6px;font-size:10px;color:var(--text-ghost);letter-spacing:.1em;flex-shrink:0}
+#sheet-backdrop{display:none;position:fixed;inset:0;z-index:19;background:rgba(0,0,0,.4)}
+#sheet-backdrop.open{display:block}
+
+
+/* Resume banner */
+#resume-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin:8px 0;background:var(--surface);border:1px solid var(--border);border-radius:12px;font-size:12px;color:var(--text-dim)}
+
+/* Reconnect sync banner */
+.resume-banner-el{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin:8px 0;background:rgba(100,200,255,0.06);border:1px solid rgba(100,200,255,0.15);border-radius:12px;font-family:'Raleway',sans-serif;font-size:12px;color:rgba(150,200,235,0.7)}
+.resume-banner-el button{flex-shrink:0;padding:6px 14px;background:rgba(100,200,255,0.12);border:1px solid rgba(100,200,255,0.2);border-radius:20px;color:#9ad4f0;font-family:'Raleway',sans-serif;font-size:12px;font-weight:600;cursor:pointer}

@@ -1,0 +1,384 @@
+// Boreas frontend module: resume flow, initialization, and pending generation recovery.
+// Loaded as a classic script in the exact order declared by index.html.
+
+import type { ActivityState } from "./streaming-trace";
+import type { ChatMessage, MessageAttachment } from "../types/chat";
+declare var currentAbortController: AbortController | null;
+declare var currentGenId: string | null;
+declare var chatLoadGeneration: number;
+declare var syncInFlight: boolean;
+declare var userStoppedGeneration: boolean;
+declare var BoreasSessionContextStale: boolean;
+declare function syncChatsFromServer(options?: { reset?: boolean }): Promise<void>;
+declare function createChat(tier?: string, speed?: string): Promise<string>;
+declare function showTyping(): void;
+declare function BOREAS_finalizeSegment(state: unknown): void;
+const resumeMessagesContainer = document.getElementById("messages") as HTMLDivElement;
+
+const thinkingSheet   = document.getElementById("thinking-sheet")!;
+const sheetBody       = document.getElementById("sheet-body")!;
+const sheetClose      = document.getElementById("sheet-close")!;
+const sheetHandle     = document.getElementById("sheet-handle")!;
+const sheetBackdrop   = document.getElementById("sheet-backdrop")!;
+const sheetExpandHint = document.getElementById("sheet-expand-hint")!;
+
+function openSheet(text: string): void {
+  sheetBody.textContent = text;
+  thinkingSheet.classList.remove("full"); thinkingSheet.classList.add("open");
+  sheetBackdrop.classList.add("open"); sheetExpandHint.style.display = "";
+}
+function closeSheet(): void {
+  thinkingSheet.classList.remove("open","full"); sheetBackdrop.classList.remove("open");
+}
+
+sheetClose.addEventListener("click", closeSheet);
+sheetBackdrop.addEventListener("click", closeSheet);
+sheetHandle.addEventListener("click", () => {
+  if (thinkingSheet.classList.contains("full")) {
+    thinkingSheet.classList.remove("full"); sheetExpandHint.style.display = "";
+  } else {
+    thinkingSheet.classList.add("full"); sheetExpandHint.style.display = "none";
+  }
+});
+sheetExpandHint.addEventListener("click", () => {
+  thinkingSheet.classList.add("full"); sheetExpandHint.style.display = "none";
+});
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h >= 6  && h < 12) return "Como posso te ajudar esta manhã?";
+  if (h >= 12 && h < 18) return "Como posso te ajudar esta tarde?";
+  if (h >= 18 && h < 24) return "Como posso te ajudar esta noite?";
+  return "Como posso te ajudar nessa madrugada?";
+}
+function setGreeting(): void {
+  const el = document.querySelector<HTMLElement>(".empty-text"); if (!el) return;
+  const name = localStorage.getItem("boreas_name");
+  const base = getGreeting();
+  el.textContent = name ? base.replace("?", `, ${name}?`) : base;
+}
+
+async function resumePending(pluginOverride?: string | null): Promise<void> {
+  if (BoreasSessionContextStale) return;
+  if (loading || !messages.length || messages[messages.length - 1].role !== "user") return;
+  const streamMessages = messages;
+  const streamChatId = localStorage.getItem(ACTIVE_KEY);
+
+  document.getElementById("resume-banner")?.remove();
+  showTyping();
+  loading = true; showStopBtn();
+
+  let thinkingTimer = setTimeout(() => {
+    const tr = document.getElementById("typing-row");
+    if (tr) {
+      const b = tr.querySelector(".bubble");
+      if (b) b.innerHTML = `<span class="work-status-label">${boreasRandomWorkStatus()}</span><span style="display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></span>`;
+    }
+  }, 1000);
+
+  currentAbortController = new AbortController();
+  const _resumeStartTime = Date.now();
+  let _resumeTimedOut = false;
+  const _resumeTimeout = setTimeout(() => {
+    _resumeTimedOut = true;
+    try { currentAbortController?.abort(); } catch {}
+  }, 90000);
+
+  const stopElapsedTicker = startElapsedTicker(
+    () => document.getElementById("typing-row")?.querySelector<HTMLElement>(".bubble") ?? null,
+    _resumeStartTime
+  );
+
+  let noGenIdTimedOut = false;
+  const stopNoResponseWatchdog = startNoResponseWatchdog(
+    () => document.getElementById("typing-row")?.querySelector<HTMLElement>(".bubble") ?? null,
+    () => { noGenIdTimedOut = true; try { currentAbortController?.abort(); } catch {} }
+  );
+
+  let masterRow: HTMLDivElement | null = null;
+  let masterCol: HTMLDivElement | null = null;
+
+  try {
+    const res = await globalThis.BoreasApi.rawFetch(BACKEND_URL, {
+      method: "POST",
+      signal: currentAbortController.signal,
+      headers: BoreasSessionHeaders({ "Content-Type": "application/json" }),
+      credentials: "include",
+      body: JSON.stringify({ tier: currentTier, speed: currentSpeed, effort: currentEffort, messages: streamMessages, chatId: streamChatId, name: localStorage.getItem("boreas_name") ?? "", use: localStorage.getItem("boreas_use") ?? "", chatMemoryEnabled, plugin: pluginOverride }), // Envia chatId, nome e uso para o servidor salvar a conversa e personalizar o contexto.
+    });
+    clearTimeout(thinkingTimer); clearTimeout(_resumeTimeout);
+    if (!res.ok) { throw await boreasHttpError(res); }
+
+    const reader = res.body!.getReader(); const decoder = new TextDecoder();
+    let reply = "", reasoning = "", buffer = "";
+    let msgAttachments: MessageAttachment[] = [];
+    let attachmentBase64Bytes = 0;
+    const MAX_SSE_BUFFER = 8 * 1024 * 1024;
+    const MAX_ATTACHMENT_BASE64 = 24 * 1024 * 1024;
+    const MAX_RESPONSE_CHARS = 8 * 1024 * 1024;
+    let pendingSourcesR: unknown[] | null = null;
+    let streamFailed = false;
+    let streamFailureMessage = "";
+    const activity: ActivityState = {};
+    let stepsCount = 0;
+  let hasUsedTool = false; const extraThinkState = {};
+    let responseBubble: HTMLDivElement | null = null;
+    let responseActions: HTMLDivElement | null = null;
+
+    const CHEVRON = `<svg class="pill-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
+    const DOTS = `<span style="display:inline-flex;gap:3px;margin-left:2px"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></span>`;
+    const BOT_IMG = `<img src="${BOREAS_LOGO_URL}" style="width:42px;height:42px;object-fit:contain;opacity:0.95" loading="lazy" decoding="async" draggable="false">`;
+
+    function ensureMasterRowR() {
+      if (!masterRow) {
+        removeTyping();
+        masterRow = document.createElement("div"); masterRow.className = "msg-row bot";
+        if (currentGenId) masterRow.dataset.generationId = String(currentGenId);
+        const avatar = document.createElement("div"); avatar.className = "avatar";
+        avatar.innerHTML = BOT_IMG;
+        masterCol = document.createElement("div"); masterCol.className = "bot-col"; masterCol.style.gap = "4px";
+        masterRow.appendChild(avatar); masterRow.appendChild(masterCol);
+        resumeMessagesContainer.appendChild(masterRow);
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > MAX_SSE_BUFFER) throw new Error("stream SSE grande demais");
+      const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim(); if (raw === "[DONE]") break;
+        try {
+          const chunk = globalThis.BoreasApi.parseStreamEvent(raw);
+          if (!chunk || chunk === "[DONE]") continue;
+          if (chunk.type === "gen_id") {
+
+            currentGenId = chunk.id;
+            const activeRow = masterRow as HTMLDivElement | null;
+            if (activeRow) activeRow.dataset.generationId = String(chunk.id);
+            savePendingGen(chunk.id, localStorage.getItem(ACTIVE_KEY));
+            stopNoResponseWatchdog();
+            continue;
+          }
+          if (chunk.type === "file" && chunk.name) {
+            if (typeof chunk.data !== "string" || chunk.data.length > MAX_ATTACHMENT_BASE64 ||
+                (attachmentBase64Bytes += chunk.data.length) > MAX_ATTACHMENT_BASE64 * 2) {
+              throw new Error("anexo recebido excede o limite de segurança");
+            }
+            clearTimeout(thinkingTimer);
+            ensureMasterRowR();
+            masterCol!.appendChild(createFileCard(chunk.name, chunk.data, chunk.mime));
+            msgAttachments.push({ type: "file", name: chunk.name, data: chunk.data, mime: chunk.mime });
+            scrollToBottom();
+            continue;
+          }
+          if (chunk.type === "deep_research") {
+            clearTimeout(thinkingTimer);
+            ensureMasterRowR();
+            renderDeepResearchCard(masterCol!, chunk);
+            if (chunk.done) msgAttachments = [...msgAttachments.filter(a => a.type !== "deep_research"), { ...chunk }];
+            continue;
+          }
+          if (chunk.type === "agentic_loop") {
+            clearTimeout(thinkingTimer);
+            ensureMasterRowR();
+            renderAgenticLoopCard(masterCol!, chunk);
+            if (chunk.done) msgAttachments = [...msgAttachments.filter(a => a.type !== "agentic_loop"), { ...chunk }];
+            continue;
+          }
+          if (chunk.type === "ask_user_prompt") {
+            clearTimeout(thinkingTimer);
+            ensureMasterRowR();
+            const _aupAns = await renderAskUserPromptCard(masterCol!, chunk.promptId, chunk.questions);
+            msgAttachments.push({ type: "ask_user_prompt", promptId: chunk.promptId, questions: chunk.questions, answers: _aupAns ?? null, timedOut: !_aupAns });
+            continue;
+          }
+          if (chunk.type === "token_exhausted") {
+            console.warn(`⚠️ Token HF esgotado no servidor - ${chunk.remaining}/${chunk.total} restantes.`);
+            continue;
+          }
+          if (chunk.type === "step") {
+            hasUsedTool = true; closeExtraThink(extraThinkState);
+            clearTimeout(thinkingTimer);
+            ensureMasterRowR();
+            masterCol!.querySelectorAll(".msg-actions").forEach((el: Element) => el.remove());
+            responseBubble = null;
+            ensureToolActivityCard(masterCol!, chunk, activity, (pill: HTMLElement, detail: HTMLElement) => { masterCol!.appendChild(pill); masterCol!.appendChild(detail); });
+            if (chunk.output !== undefined && chunk.output !== "") {
+              showInlineToolResult(masterCol!, chunk.id ?? "", chunk.tool, chunk.output, responseBubble, chunk.value);
+            }
+            stepsCount++;
+            scrollToBottom(); continue;
+          }
+
+          if (chunk.type === "error") {
+            streamFailed = true;
+            streamFailureMessage = String(chunk.message || "Falha na geração.");
+            clearTimeout(thinkingTimer); removeTyping(); ensureMasterRowR();
+            const eb = document.createElement("div"); eb.className = "bubble bot";
+            eb.textContent = `Erro: ${streamFailureMessage}`;
+            masterCol!.appendChild(eb); continue;
+          }
+
+          if (chunk.type === "sources" && chunk.results?.length) {
+            pendingSourcesR = chunk.results;
+            if (responseActions && responseActions.isConnected && !responseActions.querySelector(".sources-btn-wrap")) {
+              responseActions.appendChild(createSourcesButton(pendingSourcesR));
+            }
+            continue;
+          }
+
+          if (chunk.type === "thinking_started") {
+            ensureMasterRowR();
+            ensureThinkingSegment(activity, (pill: HTMLElement, detail: HTMLElement) => { masterCol!.appendChild(pill); masterCol!.appendChild(detail); });
+            continue;
+          }
+
+          if (chunk.type !== "choices") continue;
+          const cd = chunk.choices[0]?.delta.content ?? "";
+          if (cd) {
+            if (reply.length + String(cd).length > MAX_RESPONSE_CHARS) throw new Error("Resposta SSE grande demais");
+            if (!responseBubble) {
+              removeTyping(); ensureMasterRowR();
+              responseBubble = document.createElement("div"); responseBubble.className = "bubble bot";
+              masterCol!.appendChild(responseBubble);
+              const actions = document.createElement("div"); actions.className = "msg-actions";
+              responseActions = actions;
+              const copyBtn = document.createElement("button"); copyBtn.className = "msg-action-btn";
+              copyBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copiar`;
+              // Uses _rawText to copy the bubble's real text without reading the full DOM.
+              const bubbleForActions = responseBubble;
+              copyBtn.addEventListener("click", () => copyText(bubbleForActions._rawText ?? "", copyBtn));
+              const regenBtn = document.createElement("button"); regenBtn.className = "msg-action-btn msg-regenerate-btn";
+              regenBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.27"/></svg> Tentar novamente`;
+              regenBtn.addEventListener("click", () => regenerate(masterRow!, bubbleForActions, actions));
+              actions.appendChild(copyBtn); actions.appendChild(regenBtn);
+              if (pendingSourcesR?.length) actions.appendChild(createSourcesButton(pendingSourcesR));
+              masterCol!.appendChild(actions);
+            }
+            reply += cd; scheduleMarkdownRender(responseBubble, reply);
+            scrollToBottom();
+            await new Promise(r => setTimeout(r, 0));
+          }
+        } catch (parseErr) { /* SSE inválida; ignorar. */ }
+      }
+    }
+
+    if (responseBubble) renderMarkdown(responseBubble, reply);
+    finalizeThinkingSegment(activity);
+    removeTyping();
+    if (streamFailed) {
+      stopElapsedTicker();
+      clearPendingGen();
+      currentGenId = null;
+      return;
+    }
+    if (!responseBubble && !reply && !reasoning) appendMessage("bot", "Sem resposta.");
+    if (messages !== streamMessages || localStorage.getItem(ACTIVE_KEY) !== streamChatId) { stopElapsedTicker(); return; }
+    const finalAssistantMsg: ChatMessage = { role: "assistant", content: reply, ...(msgAttachments.length ? { attachments: msgAttachments } : {}), ...(currentGenId ? { genId: currentGenId } : {}) };
+    messages.push(finalAssistantMsg);
+    saveCurrentMessages();
+    refreshPersistedThinkingSummary({ chatId: streamChatId, genId: currentGenId, activity, assistantMessage: finalAssistantMsg });
+    updateRegenerateAvailability();
+    if (responseBubble) responseBubble._rawText = reply;
+    stopElapsedTicker();
+
+  } catch (e: unknown) {
+    stopElapsedTicker();
+    if (messages !== streamMessages || localStorage.getItem(ACTIVE_KEY) !== streamChatId) return;
+    clearTimeout(thinkingTimer); clearTimeout(_resumeTimeout); stopNoResponseWatchdog(); removeTyping();
+    if (e instanceof Error && e.name === "AbortError" && userStoppedGeneration) {
+      // Stop requested by the user or by a failed prompt-response request.
+    } else if (noGenIdTimedOut) {
+      (masterRow as HTMLDivElement | null)?.remove();
+      showNoResponseError(() => resumePending(pluginOverride));
+    } else if (currentGenId) {
+      showSyncBanner(currentGenId);
+    } else if (e instanceof Error && e.name === "AbortError" && _resumeTimedOut) {
+      appendMessage("bot", "⏱ Sem resposta do servidor. Verifique sua conexão e tente novamente.");
+    } else if (!(e instanceof Error) || e.name !== "AbortError") {
+      appendMessage("bot", `Erro: ${e instanceof Error ? e.message : "Falha ao retomar geração."}`);
+    }
+  } finally {
+    loading = false; hideStopBtn();
+  }
+}
+
+(async function initChats() {
+
+  const loadGenerationAtBoot = chatLoadGeneration;
+  let syncDone = false;
+  const syncPromise = syncChatsFromServer().then(() => { syncDone = true; });
+  try { await Promise.race([syncPromise, new Promise(r => setTimeout(r, 8000))]); } catch {}
+  renderSidebar();
+
+  if (!syncDone) {
+    syncPromise.then(() => {
+      renderSidebar();
+
+      const currentId = localStorage.getItem(ACTIVE_KEY);
+      const currentMeta = currentId ? _chatsMeta[currentId] : undefined;
+      const allNow = Object.values(_chatsMeta).filter(c => c.hasMessages).sort((a, b) =>
+        (b.updatedAt ?? 0) > (a.updatedAt ?? 0) ? 1 : -1
+      );
+      // Bug fix: this used to check `messages.length === 0` as a proxy for
+      // "no load already in flight for currentId", but that's the wrong
+      // signal — the initial loadChat() below can still be awaiting its
+      // fetch/restoreImages when this late syncPromise resolves, so
+      // `messages` reads as empty even though a load is already underway.
+      // Racing a second loadChat(allNow[0].id) against it let both calls
+      // clear the guard at chatLoadGeneration independently and both
+      // populate messagesEl, duplicating every message. Guard on the load
+      // generation itself instead, and only fire if we're still on the
+      // chat this check is about (currentId), not a stale currentMeta read.
+      const noLoadInFlight = loadGenerationAtBoot === chatLoadGeneration;
+      if (allNow.length > 0 && currentMeta && !currentMeta.hasMessages
+          && currentId === allNow[0].id && noLoadInFlight) {
+        loadChat(allNow[0].id);
+      }
+    }).catch(() => {});
+  }
+
+  // On app open, only resumes a saved chat when a pending generation exists; otherwise starts a new chat.
+  const pendingBoot = getPendingGen();
+  // The remote index can arrive after the first paint; the pending chat is
+  // a persisted key independent of the sidebar's timing.
+  if (pendingBoot?.genId && pendingBoot.chatId) {
+    await loadChat(pendingBoot.chatId);
+  } else {
+    const newId = await createChat(currentTier, currentSpeed);
+    await loadChat(newId, { skipRemote: true });
+  }
+
+  const pending = getPendingGen();
+  // Shows the sync banner when a pending generation still exists that can be resumed.
+  const pendingGenerationId = pending?.genId;
+  if (pendingGenerationId && pending?.chatId === localStorage.getItem(ACTIVE_KEY)) {
+    showSyncBanner(pendingGenerationId);
+    setTimeout(() => {
+      const current = getPendingGen();
+      if (current?.genId === pendingGenerationId && navigator.onLine !== false) syncGeneration(pendingGenerationId);
+    }, 120);
+  }
+})();
+
+function resumePendingGenerationIfNeeded() {
+  const pending = getPendingGen();
+  if (!pending?.genId || pending.chatId !== localStorage.getItem(ACTIVE_KEY)) return;
+  if (loading || syncInFlight || navigator.onLine === false) return;
+  syncGeneration(pending.genId);
+}
+
+window.addEventListener("online", resumePendingGenerationIfNeeded);
+window.addEventListener("pageshow", resumePendingGenerationIfNeeded);
+window.addEventListener("focus", resumePendingGenerationIfNeeded);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") resumePendingGenerationIfNeeded();
+});
+
+setGreeting();
+updateSidebarUser();
+
+export {};

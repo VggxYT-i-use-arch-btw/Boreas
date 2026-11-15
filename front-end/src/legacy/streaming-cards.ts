@@ -1,0 +1,593 @@
+// Boreas frontend module: deep research, agentic loop, prompt cards, and activity timeline.
+// Loaded as a classic script in the exact order declared by index.html.
+
+import type { ActivityState } from "./streaming-trace";
+import type { ChatMessage, ToolStep } from "../types/chat";
+
+type DeepResearchCardData = { title?: string; step?: number; done?: boolean; label?: string };
+type AgenticLoopCardData = { percent?: number; stage?: number; plan?: unknown; summary?: unknown; done?: boolean; converged?: boolean };
+type AskUserQuestion = { question: string; options?: string[]; multi?: boolean };
+type PromptAnswer = string | string[] | null;
+type ActivitySegmentState = ActivityState & { el?: HTMLElement | null; outEl?: HTMLElement | null; text?: string; cur?: { el?: HTMLElement | null; outEl?: HTMLElement | null; text?: string } | null };
+type ToolActivityCard = HTMLDivElement & { _body?: HTMLDivElement };
+type SubagentWidgetHost = HTMLElement & { _subagentWidgets?: Map<string, HTMLDivElement>; _toolActivityCards?: Map<string, ToolActivityCard> };
+type AgenticLoopCard = HTMLDivElement & { _plan?: string[] | null };
+const required = <T extends Element = HTMLElement>(parent: ParentNode, selector: string): T => parent.querySelector(selector) as T;
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+
+declare var currentAbortController: AbortController | null;
+declare var currentGenId: string | null;
+declare var userStoppedGeneration: boolean;
+declare function BOREAS_tracePhasesForSegment(summary: unknown, segmentIndex: number): Array<{ title: string; body: string }>;
+declare function BOREAS_traceBuildThinkingItem(phase: { title: string; body: string }): { item: HTMLElement; summaryEl: HTMLElement };
+declare function BOREAS_traceSetPreview(state: ActivityState, text: string): void;
+declare function BOREAS_finalizeSegment(state: unknown): void;
+declare function ensureToolSegment(state: ActivityState, mountFn: (pill: HTMLElement, detail: HTMLElement) => void): { kind: "tool"; itemsEl: HTMLElement; stepCount?: number };
+
+const DR_STEP_TITLES = [
+  "Entender a tarefa",
+  "Definir objetivos e restrições",
+  "Coletar fontes",
+  "Verificar e comparar evidências",
+  "Escrever resposta final",
+];
+const DR_CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+// "Expand" button on research/loop cards; appears once the step lines stop
+// truncating with "..." and show the plan's full text.
+const DR_EXPAND_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+
+function renderDeepResearchCard(col: HTMLElement | null, chunk: DeepResearchCardData): void {
+  if (!col) return;
+  let card = col.querySelector<HTMLDivElement>(".dr-card");
+  if (!card) {
+    card = document.createElement("div"); card.className = "dr-card";
+    const stepsHtml = DR_STEP_TITLES.map((label, i) => `
+      <div class="dr-step" data-step="${i + 1}">
+        <span class="dr-step-icon"></span>
+        <span class="dr-step-text">${label}</span>
+      </div>`).join("");
+    card.innerHTML = `
+      <div class="dr-card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a2 2 0 0 1 2-2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 2v5h5M9 13h6M9 17h6"/></svg>
+        <span class="dr-card-title-text">Pesquisa Aprofundada</span>
+      </div>
+      <div class="dr-card-steps">${stepsHtml}</div>
+      <div class="dr-card-current"></div>
+      <button type="button" class="dr-expand-btn" aria-label="Expandir">${DR_EXPAND_ICON}</button>`;
+    required<HTMLButtonElement>(card, ".dr-expand-btn").addEventListener("click", () => card!.classList.toggle("expanded"));
+    col.appendChild(card);
+  }
+
+  if (chunk.title) required<HTMLElement>(card, ".dr-card-title-text").textContent = chunk.title;
+
+  const activeStep = Math.max(0, Math.min(5, chunk.step ?? 0));
+  card.querySelectorAll<HTMLElement>(".dr-step").forEach(stepEl => {
+    const n = Number(stepEl.dataset.step);
+    const icon = required<HTMLElement>(stepEl, ".dr-step-icon");
+    stepEl.classList.remove("active", "done");
+    if (n < activeStep || chunk.done) { stepEl.classList.add("done"); icon.innerHTML = DR_CHECK_ICON; }
+    else if (n === activeStep && !chunk.done) { stepEl.classList.add("active"); icon.innerHTML = ""; }
+    else { icon.innerHTML = ""; }
+  });
+
+  const currentEl = required<HTMLElement>(card, ".dr-card-current");
+  if (chunk.done) {
+    currentEl.textContent = "Pesquisa aprofundada concluída";
+    currentEl.className = "dr-card-current dr-card-done-msg";
+  } else if (chunk.label) {
+    currentEl.className = "dr-card-current";
+    currentEl.replaceChildren();
+    const label = document.createElement("b");
+    label.textContent = "Boreas:";
+    currentEl.append(label, document.createTextNode(` ${String(chunk.label).slice(0, 2000)}`));
+  }
+  scrollToBottom();
+}
+
+const AL_STAGE_TITLES = [
+  "Início",
+  "Pensamento",
+  "Execução",
+  "Avaliação e correção",
+  "Toques finais",
+];
+
+// Model poll (ask_user_prompt tool), Claude-card style: one question at a
+// time with an "N of M" counter, numbered-list options, an X to skip all,
+// and a free-text field for when no option fits.
+// Contract with the server doesn't change: resolves by POSTing
+// /prompt-response/:id with { answers }, one item per question (string,
+// array of strings, or null if the question was skipped or expired).
+function renderAskUserPromptCard(col: HTMLElement, promptId: string, questions: AskUserQuestion[]): Promise<PromptAnswer[] | null | undefined> {
+  return new Promise<PromptAnswer[] | null | undefined>(resolve => {
+    let card: HTMLDivElement, answers: PromptAnswer[], qi = 0, settled = false;
+    try {
+      card = document.createElement("div");
+      card.className = "aup-card";
+      answers = new Array(questions.length).fill(null);
+    } catch (e) {
+      console.error("[aup] falha ao montar o card:", e);
+      resolve(undefined);
+      return;
+    }
+
+    // Safety net: if something silently hangs mid-flow (a DOM error, a
+    // render race), don't leave the whole stream stuck. Gives up after 5
+    // minutes and reports everything as unanswered, matching the timeout
+    // the server already applies on /prompt-response.
+    const safetyTimer = setTimeout(() => {
+      console.warn("[aup] safety timeout, resolving unanswered");
+      finish();
+    }, 300000);
+
+async function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyTimer);
+      let responseDelivered = false;
+      let responseStatusEl: HTMLElement | null = null;
+      try {
+        card.classList.add("answered");
+        card.innerHTML = "";
+        const done = document.createElement("div");
+        done.className = "aup-done";
+        done.textContent = "Respondido";
+        card.appendChild(done);
+        responseStatusEl = done;
+      } catch (e) { console.error("[aup] falha ao fechar o card:", e); }
+      try {
+        const safePromptId = encodeURIComponent(String(promptId ?? ""));
+        if (!safePromptId || safePromptId === "%22%22") throw new Error("prompt inválido");
+        const responseController = new AbortController();
+        const responseTimer = setTimeout(() => responseController.abort(), 15000);
+        let response;
+        try {
+          response = await globalThis.BoreasApi.rawFetch(BACKEND_URL + "/prompt-response/" + safePromptId, {
+            method: "POST",
+            headers: BoreasSessionHeaders({ "Content-Type": "application/json" }),
+            credentials: "include",
+            body: JSON.stringify({ answers }),
+            signal: responseController.signal,
+          });
+        } finally {
+          clearTimeout(responseTimer);
+        }
+        if (!response.ok) throw await boreasHttpError(response);
+        responseDelivered = true;
+      } catch (e) { console.error("[aup] falha ao enviar resposta:", e); }
+      if (!responseDelivered) {
+        if (responseStatusEl) {
+          responseStatusEl.textContent = "Falha ao enviar";
+          responseStatusEl.classList.add("error");
+        }
+        userStoppedGeneration = true;
+        try { currentAbortController?.abort(); } catch {}
+        if (currentGenId) {
+          globalThis.BoreasApi.rawFetch(BACKEND_URL + "/chat/stop", {
+            method: "POST",
+            headers: BoreasSessionHeaders({ "Content-Type": "application/json" }),
+            credentials: "include",
+            body: JSON.stringify({ genId: currentGenId }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+      }
+      resolve(responseDelivered ? answers : null);
+    }
+
+    function advance() {
+      if (qi < questions.length - 1) { qi++; renderQuestion(); scrollToBottom(); }
+      else finish();
+    }
+
+    function renderQuestion() {
+      card.innerHTML = "";
+      const q = questions[qi];
+      const isMulti = !!q.multi;
+
+      const header = document.createElement("div"); header.className = "aup-header";
+      const counter = document.createElement("span"); counter.className = "aup-counter";
+      counter.textContent = questions.length > 1 ? `${qi + 1} de ${questions.length}` : "";
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button"; closeBtn.className = "aup-close"; closeBtn.setAttribute("aria-label", "Fechar");
+      closeBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+      closeBtn.addEventListener("click", finish);
+      header.appendChild(counter); header.appendChild(closeBtn);
+      card.appendChild(header);
+
+      const qText = document.createElement("div"); qText.className = "aup-question-text"; qText.textContent = q.question;
+      card.appendChild(qText);
+
+      const list = document.createElement("div"); list.className = "aup-list";
+      let confirmBtn: HTMLButtonElement | null = null;
+      (q.options || []).forEach((opt, oi) => {
+        const row = document.createElement("button");
+        row.type = "button"; row.className = "aup-row";
+        const badge = document.createElement("span"); badge.className = "aup-badge"; badge.textContent = String(oi + 1);
+        const label = document.createElement("span"); label.className = "aup-row-label"; label.textContent = opt;
+        row.appendChild(badge); row.appendChild(label);
+        row.addEventListener("click", () => {
+          if (isMulti) {
+            row.classList.toggle("selected");
+            const sel = Array.from(list.querySelectorAll<HTMLButtonElement>(".aup-row.selected")).map(r => required<HTMLElement>(r, ".aup-row-label").textContent ?? "");
+            answers[qi] = sel;
+            confirmBtn!.disabled = !sel.length;
+          } else {
+            list.querySelectorAll<HTMLButtonElement>(".aup-row").forEach(r => r.disabled = true);
+            answers[qi] = opt;
+            advance();
+          }
+        });
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+
+      if (isMulti) {
+        confirmBtn = document.createElement("button");
+        confirmBtn.type = "button"; confirmBtn.className = "aup-confirm-btn"; confirmBtn.textContent = "Confirmar";
+        confirmBtn.disabled = true;
+        confirmBtn.addEventListener("click", advance);
+        card.appendChild(confirmBtn);
+      } else {
+        const inputRow = document.createElement("div"); inputRow.className = "aup-input-row";
+        const input = document.createElement("input");
+        input.type = "text"; input.className = "aup-input"; input.placeholder = "Digite sua própria resposta...";
+        const sendBtn = document.createElement("button");
+        sendBtn.type = "button"; sendBtn.className = "aup-send-btn";
+        sendBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`;
+        function submitFree() {
+          const v = input.value.trim();
+          if (!v) return;
+          list.querySelectorAll<HTMLButtonElement>(".aup-row").forEach(r => r.disabled = true);
+          input.disabled = true; sendBtn.disabled = true;
+          answers[qi] = v;
+          advance();
+        }
+        sendBtn.addEventListener("click", submitFree);
+        input.addEventListener("keydown", e => { if (e.key === "Enter") submitFree(); });
+        inputRow.appendChild(input); inputRow.appendChild(sendBtn);
+        card.appendChild(inputRow);
+      }
+    }
+
+    try {
+      renderQuestion();
+      col.appendChild(card);
+      scrollToBottom();
+    } catch (e) {
+      console.error("[aup] falha ao renderizar a pergunta:", e);
+      clearTimeout(safetyTimer);
+      resolve(undefined);
+    }
+  });
+}
+
+// Rebuilds an already-answered poll (ask_user_prompt) from saved history:
+// a read-only version, no buttons, so the card doesn't disappear on reload.
+function renderAskUserPromptRecap(col: HTMLElement, { questions, answers, timedOut }: { questions: AskUserQuestion[]; answers: unknown; timedOut: boolean }): void {
+  const card = document.createElement("div");
+  card.className = "aup-card answered";
+  if (timedOut || !Array.isArray(answers)) {
+    const done = document.createElement("div");
+    done.className = "aup-done";
+    done.textContent = "Não respondido a tempo";
+    card.appendChild(done);
+  } else {
+    questions.forEach((q, i) => {
+      const row = document.createElement("div"); row.className = "aup-recap-row";
+      const qEl = document.createElement("div"); qEl.className = "aup-question-text"; qEl.textContent = q.question;
+      const aVal = answers[i];
+      const aEl = document.createElement("div"); aEl.className = "aup-recap-answer";
+      aEl.textContent = Array.isArray(aVal) ? aVal.map(String).join(", ") : (typeof aVal === "string" ? aVal : "(sem resposta)");
+      row.appendChild(qEl); row.appendChild(aEl);
+      card.appendChild(row);
+    });
+  }
+  col.appendChild(card);
+}
+
+// Compatibility hook for older stream call sites. The unified Phosphor trace
+// in streaming-trace.js owns the live/replay visual state now.
+function closeExtraThink(state: ActivitySegmentState | null | undefined): void {
+  if (state) { state.el = null; state.outEl = null; state.text = ""; }
+}
+
+function updateThinkingSummary(state: ActivityState, summary: unknown): void {
+  const trace = state?.trace;
+  if (!trace || !summary) return;
+  state.thinkingSummary = summary;
+  trace.items.filter(item => item?.kind === "thinking").forEach(entry => {
+    const phases = BOREAS_tracePhasesForSegment(summary, entry.segmentIndex ?? 0);
+    if (!phases.length || !entry.items?.length) return;
+    const built = phases.map(phase => BOREAS_traceBuildThinkingItem(phase));
+    entry.items[0].replaceWith(...built.map(part => part.item));
+    entry.items = built.map(part => part.item);
+    entry.summaryEls = built.map(part => part.summaryEl);
+  });
+  const latest = [...trace.items].reverse().find(item => item?.kind === "thinking");
+  const latestPhase = latest ? BOREAS_tracePhasesForSegment(summary, latest.segmentIndex ?? 0).at(-1) : null;
+  if (latestPhase) BOREAS_traceSetPreview(state, latestPhase.title);
+}
+
+// The summary is persisted asynchronously after the main response is saved.
+// All completion paths (live stream, resume, regenerate, and reconnect) use
+// the same short poll so the current DOM does not require a full reload to
+// receive it.
+function refreshPersistedThinkingSummary({ chatId, genId, activity, assistantMessage }: { chatId?: string | null; genId?: string | null; activity?: ActivityState | null; assistantMessage?: ChatMessage } = {}): void {
+  if (!chatId || !genId || !activity?.trace) return;
+  const run = async (attempt: number): Promise<void> => {
+    if (localStorage.getItem(ACTIVE_KEY) !== chatId) return;
+    try {
+      const response = await BoreasFetchWithTimeout(`${BACKEND_URL}/chats/${encodeURIComponent(chatId)}`, {
+        headers: BoreasSessionHeaders(), credentials: "include",
+      }, 8000);
+      if (!response.ok) return;
+      const data: unknown = await response.json();
+      const chat = isRecord(data) && isRecord(data.chat) ? data.chat : null;
+      const savedAssistant = chat && Array.isArray(chat.messages)
+        ? chat.messages.find((message): message is Record<string, unknown> => isRecord(message) && message.role === "assistant" && message.genId === genId)
+        : undefined;
+      if (savedAssistant?.thinkingSummary) {
+        if (assistantMessage) assistantMessage.thinkingSummary = savedAssistant.thinkingSummary;
+        updateThinkingSummary(activity, savedAssistant.thinkingSummary);
+      } else if (attempt < 3) {
+        setTimeout(() => { void run(attempt + 1); }, 1200 * (attempt + 1));
+      }
+    } catch {
+      if (attempt < 3) setTimeout(() => { void run(attempt + 1); }, 1200 * (attempt + 1));
+    }
+  };
+  setTimeout(() => { void run(0); }, 900);
+}
+// Closes the open segment (if any) and resets the pointer, without opening
+// a new one; used before standalone widgets (e.g. sub-agents) that don't
+// belong to any "Thinking process"/"Tools" pill. Without this, reasoning
+// that resumes after the widget would keep accumulating into the segment
+// from before it.
+function closeActivitySegment(state: ActivitySegmentState | null | undefined): void {
+  if (state?.cur) { BOREAS_finalizeSegment(state.cur); state.cur = null; }
+}
+// Standalone widget (outside any collapsible pill) for invoke-subagents:
+// shows "Answered with N subagents" with one item per agent, each with a
+// shimmer while running and a check when done. Updates live because
+// step.id is the same call id from start to finish; only the innerHTML changes.
+const SUBAGENTS_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g fill="currentColor"><ellipse cx="12" cy="4.2" rx="2.1" ry="3.1"></ellipse><ellipse cx="12" cy="4.2" rx="2.1" ry="3.1" transform="rotate(60 12 12)"></ellipse><ellipse cx="12" cy="4.2" rx="2.1" ry="3.1" transform="rotate(120 12 12)"></ellipse><ellipse cx="12" cy="4.2" rx="2.1" ry="3.1" transform="rotate(180 12 12)"></ellipse><ellipse cx="12" cy="4.2" rx="2.1" ry="3.1" transform="rotate(240 12 12)"></ellipse><ellipse cx="12" cy="4.2" rx="2.1" ry="3.1" transform="rotate(300 12 12)"></ellipse></g></svg>`;
+const SUBAGENT_CHECK_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+function ensureSubagentsWidget(container: SubagentWidgetHost | null, step: ToolStep | null | undefined): HTMLDivElement | null {
+  if (!container || !step?.id) return null;
+  let data: Record<string, unknown> = {};
+  try { const parsed: unknown = JSON.parse(step.value || "{}"); if (isRecord(parsed)) data = parsed; } catch { data = {}; }
+  const agents = Array.isArray(data.agents) ? data.agents.filter(isRecord) : [];
+  if (!container._subagentWidgets) container._subagentWidgets = new Map();
+  let widget = container._subagentWidgets.get(step.id);
+  if (!widget) {
+    widget = document.createElement("div"); widget.className = "subagents-widget";
+    widget.innerHTML = `<button type="button" class="subagents-widget-header"><span class="subagents-widget-icon">${SUBAGENTS_ICON}</span><span class="subagents-widget-title"></span><svg class="subagents-widget-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button><div class="subagents-widget-list"></div>`;
+    required<HTMLButtonElement>(widget, ".subagents-widget-header").addEventListener("click", () => widget!.classList.toggle("collapsed"));
+    container._subagentWidgets.set(step.id, widget);
+    container.appendChild(widget);
+  }
+  const activeWidget = widget!;
+  const total = agents.length;
+  const doneCount = agents.filter(a => a.status === "done").length;
+  const allDone = total > 0 && doneCount === total;
+  activeWidget.classList.toggle("all-done", allDone);
+  activeWidget.classList.toggle("is-running", !allDone);
+  const titleEl = required<HTMLElement>(activeWidget, ".subagents-widget-title");
+  titleEl.textContent = total
+    ? `Answered with ${total} subagent${total === 1 ? "" : "s"}`
+    : (data.error ? "Sub-agents failed" : "Starting subagents…");
+  const list = required<HTMLElement>(activeWidget, ".subagents-widget-list");
+  list.innerHTML = "";
+  agents.forEach((a: Record<string, unknown>) => {
+    const item = document.createElement("div");
+    item.className = "subagent-row " + (a?.status === "done" ? "is-done" : "is-running");
+    const label = document.createElement("span"); label.className = "subagent-row-label"; label.textContent = String(a.label ?? "");
+    const mark = document.createElement("span"); mark.className = "subagent-row-check";
+    if (a.status === "done") mark.innerHTML = SUBAGENT_CHECK_ICON;
+    item.appendChild(label); item.appendChild(mark);
+    list.appendChild(item);
+  });
+  return widget;
+}
+
+const TOOL_ACTIVITY_LABELS: Record<string, string> = {
+  WEB_SEARCH: "Pesquisando na web", WEB_FETCH: "Lendo fonte", BASH: "Executando no sandbox",
+  DELETE: "Removendo arquivo", STR_REPLACE: "Editando arquivo", SEND_FILE: "Preparando arquivo",
+  CREATE_FILE: "Criando arquivo", MEMORY: "Atualizando memória", PREFERENCES: "Atualizando preferências",
+  ASK_USER: "Aguardando sua resposta", CALCULATOR: "Calculando", GRAPH: "Criando gráfico",
+  FORWARD_MESSAGE: "Escalando modelo", USE_PLUGIN: "Ativando recurso", IMAGE_SEARCH: "Buscando imagens",
+  PRESENT_IMAGE: "Mostrando imagens", VIEW_CHATS: "Consultando conversas", CURRENCY: "Consultando câmbio",
+  DEEP_RESEARCH: "Pesquisando profundamente", AGENTIC_LOOP: "Executando plano",
+  USE_TOOL: "Carregando ferramenta",
+};
+function toolActivityLabel(tool: string, value: unknown): { label: string; detail: string } {
+  const label = TOOL_ACTIVITY_LABELS[tool] ?? "Usando ferramenta";
+  const detail = String(value ?? "").trim();
+  return { label, detail: detail.length > 110 ? `${detail.slice(0, 107)}…` : detail };
+}
+const TOOL_ACTIVITY_ICON_PATHS = {
+  WEB_SEARCH: `<circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path>`,
+  WEB_FETCH: `<circle cx="12" cy="12" r="9"></circle><ellipse cx="12" cy="12" rx="4" ry="9"></ellipse><path d="M3 12h18"></path><path d="M4.5 7.5h15"></path><path d="M4.5 16.5h15"></path>`,
+  BASH: `<polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line>`,
+  DELETE: `<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path><path d="M9 6V4h6v2"></path>`,
+  STR_REPLACE: `<path d="m4 17 6-6"></path><path d="m14 7 6-4-4 6"></path><path d="M3 21h6"></path>`,
+  SEND_FILE: `<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline>`,
+  CREATE_FILE: `<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M12 12v6M9 15h6"></path>`,
+  MEMORY: `<circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"></path>`,
+  PREFERENCES: `<circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>`,
+  CALCULATOR: `<rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M8 6h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h2M14 19h2"></path>`,
+  IMAGE_SEARCH: `<circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4M8 13l2-2 2 2 2-2 2 2"></path>`,
+  ASK_USER: `<path d="M12 2a10 10 0 1 0 4.24 19.03L22 22l-1.29-4.24A10 10 0 0 0 12 2Z"></path><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2 1.75-2 3.5"></path><path d="M12 16.5h.01"></path>`,
+  GRAPH: `<path d="M3 3v18h18"></path><path d="m19 9-5 5-4-4-4 4"></path>`,
+  FORWARD_MESSAGE: `<path d="m10 17 5-5-5-5"></path><path d="M4 17V7a2 2 0 0 1 2-2h13"></path>`,
+  USE_PLUGIN: `<path d="M12 2v4"></path><path d="M6 8h12l1 6a6 6 0 0 1-6 6h-2a6 6 0 0 1-6-6l1-6Z"></path><path d="M9 14v2M15 14v2"></path>`,
+  PRESENT_IMAGE: `<rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="m4 18 5-5 4 4 3-3 4 4"></path>`,
+  VIEW_CHATS: `<path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`,
+  CURRENCY: `<circle cx="12" cy="12" r="9"></circle><path d="M15 9.5a3 3 0 0 0-3-1.5c-1.7 0-3 1-3 2.3 0 3.2 6 1.5 6 4.7 0 1.3-1.3 2.3-3 2.3a3 3 0 0 1-3-1.5"></path><path d="M12 6v2M12 16v2"></path>`,
+  DEEP_RESEARCH: `<circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path><path d="M11 8v3l2 2"></path>`,
+  AGENTIC_LOOP: `<path d="M17 2.1l4 4-4 4"></path><path d="M3 12.7V9.6a4 4 0 0 1 4-4h13.4"></path><path d="M7 21.9l-4-4 4-4"></path><path d="M21 11.3v3.1a4 4 0 0 1-4 4H3.6"></path>`,
+  USE_TOOL: `<rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect>`,
+};
+function toolActivityIconSvg(tool: string): string {
+  const paths = (TOOL_ACTIVITY_ICON_PATHS as Record<string, string>)[tool] ?? TOOL_ACTIVITY_ICON_PATHS.PREFERENCES;
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
+function updateToolActivityCard(card: ToolActivityCard, tool: string, value: unknown, output: unknown): void {
+  const { label, detail } = toolActivityLabel(tool, value);
+  card.dataset.tool = tool ?? "";
+  required<HTMLElement>(card, ".tool-activity-title").textContent = label;
+  required<HTMLElement>(card, ".tool-activity-value").textContent = detail;
+  const done = output !== undefined;
+  card.classList.toggle("is-done", done);
+  required<HTMLElement>(card, ".tool-activity-status").textContent = done ? "Concluído" : "Executando";
+  const body = card._body!;
+  body.innerHTML = "";
+  if (!done) return;
+  // The rich widget (currency, chart, images...) appears directly in the
+  // conversation via showInlineToolResult; here, inside the collapsed card,
+  // only the raw output is shown, for anyone who wants to check what the
+  // tool actually returned. A blank/whitespace-only output has nothing to
+  // show, so has-details must stay false - otherwise the expand chevron
+  // is clickable but reveals an empty box.
+  const outputText = String(output ?? "").slice(0, 5000);
+  const hasRealOutput = outputText.trim().length > 0;
+  if (hasRealOutput) {
+    const out = document.createElement("pre"); out.className = "tool-activity-output";
+    out.textContent = outputText; body.appendChild(out);
+  }
+  card.classList.toggle("has-details", hasRealOutput);
+}
+const MAX_TOOL_ACTIVITY_CARDS = 256;
+function pruneToolActivityCards(host: SubagentWidgetHost | null): void {
+  const cards = host?._toolActivityCards;
+  if (!cards) return;
+  for (const [id, card] of cards) {
+    if (!card.isConnected || card.classList.contains("is-done")) cards.delete(id);
+  }
+  while (cards.size > MAX_TOOL_ACTIVITY_CARDS) {
+    const oldest = cards.keys().next().value;
+    if (oldest === undefined) break;
+    const card = cards.get(oldest);
+    cards.delete(oldest);
+    if (card?.isConnected && !card.classList.contains("is-done")) {
+      card.classList.add("is-done");
+      required<HTMLElement>(card, ".tool-activity-status").textContent = "Interrompido";
+    }
+  }
+}
+function ensureToolActivityCard(container: HTMLElement | null, step: ToolStep | null | undefined, activityState: ActivityState | null | undefined, mountFn: (pill: HTMLElement, detail: HTMLElement) => void): HTMLElement | null {
+  if (!container || !step) return null;
+  if (step.tool === "INVOKE_SUBAGENTS") {
+    // Standalone widget: not part of the "Tools" pill; closes any open
+    // segment (without opening a new one) and renders directly in the
+    // timeline, like the showInlineToolResult widgets.
+    closeActivitySegment(activityState);
+    return ensureSubagentsWidget(container, step);
+  }
+  const state = activityState ?? {};
+  const seg = ensureToolSegment(state, mountFn ?? (() => {}));
+  const host = (seg?.itemsEl ?? container) as SubagentWidgetHost;
+  const id = step.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  if (!host._toolActivityCards) host._toolActivityCards = new Map<string, ToolActivityCard>();
+  pruneToolActivityCards(host);
+  let card = host._toolActivityCards.get(id);
+  if (!card) {
+    card = document.createElement("div") as ToolActivityCard; card.className = "tool-activity-card";
+    card.innerHTML = `<button type="button" class="tool-activity-header"><span class="tool-activity-icon"></span><span class="tool-activity-copy"><span class="tool-activity-title"></span><span class="tool-activity-value"></span></span><span class="tool-activity-status">Executando</span><svg class="tool-activity-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>`;
+    card._body = document.createElement("div"); card._body.className = "tool-activity-body"; card.appendChild(card._body);
+    required<HTMLElement>(card, ".tool-activity-icon").innerHTML = toolActivityIconSvg(step.tool);
+    required<HTMLButtonElement>(card, ".tool-activity-header").addEventListener("click", () => {
+      if (!card!.classList.contains("has-details")) return;
+      card!.classList.toggle("expanded");
+    });
+    host._toolActivityCards.set(id, card); host.appendChild(card);
+    if (seg) seg.stepCount = (seg.stepCount ?? 0) + 1;
+  }
+  updateToolActivityCard(card, step.tool, step.value, step.output);
+  if (step.output !== undefined) {
+    queueMicrotask(() => {
+      if (host._toolActivityCards?.get(id) === card) host._toolActivityCards.delete(id);
+    });
+  }
+  return card;
+}
+
+function renderAgenticLoopCard(col: HTMLElement | null, chunk: AgenticLoopCardData): void {
+  if (!col) return;
+  let card = col.querySelector<AgenticLoopCard>(".al-card");
+  if (!card) {
+    card = document.createElement("div"); card.className = "al-card dr-card";
+    const stepsHtml = AL_STAGE_TITLES.map((label, i) => `
+      <div class="dr-step" data-step="${i + 1}">
+        <span class="dr-step-icon"></span>
+        <span class="dr-step-text"><b>${label}</b></span>
+      </div>`).join("");
+    card.innerHTML = `
+      <div class="dr-card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+        <span class="dr-card-title-text">Loop Agêntico</span>
+        <span class="al-card-percent"></span>
+      </div>
+      <div class="dr-card-steps">${stepsHtml}</div>
+      <div class="dr-card-current"></div>
+      <button type="button" class="dr-expand-btn" aria-label="Expandir">${DR_EXPAND_ICON}</button>`;
+    required<HTMLButtonElement>(card, ".dr-expand-btn").addEventListener("click", () => card!.classList.toggle("expanded"));
+    card._plan = null;
+    col.appendChild(card);
+  }
+
+  // On the first call, the model writes a concrete description per step
+  // (based on the real goal); stored on the card so it survives future
+  // updates that don't resend the plan.
+  const plan = Array.isArray(chunk.plan) ? chunk.plan.filter((line): line is string => typeof line === "string") : [];
+  if (plan.length) card._plan = plan;
+
+  const percentEl = required<HTMLElement>(card, ".al-card-percent");
+  if (percentEl && typeof chunk.percent === "number") percentEl.textContent = `${chunk.percent}%`;
+
+  const activeStage = Math.max(0, Math.min(5, chunk.stage ?? 0));
+  card.querySelectorAll<HTMLElement>(".dr-step").forEach(stepEl => {
+    const n = Number(stepEl.dataset.step);
+    const icon = required<HTMLElement>(stepEl, ".dr-step-icon");
+    const textEl = required<HTMLElement>(stepEl, ".dr-step-text");
+    const planLine = card._plan?.[n - 1];
+    textEl.replaceChildren();
+    const stageLabel = document.createElement("b");
+    stageLabel.textContent = AL_STAGE_TITLES[n - 1] + (planLine ? ":" : "");
+    textEl.appendChild(stageLabel);
+    if (planLine) textEl.appendChild(document.createTextNode(` ${String(planLine).slice(0, 500)}`));
+    stepEl.classList.remove("active", "done");
+    if (n < activeStage || (chunk.done && chunk.converged !== false)) { stepEl.classList.add("done"); icon.innerHTML = DR_CHECK_ICON; }
+    else if (n === activeStage && !chunk.done) { stepEl.classList.add("active"); icon.innerHTML = ""; }
+    else { icon.innerHTML = ""; }
+  });
+
+  const currentEl = required<HTMLElement>(card, ".dr-card-current");
+  if (chunk.done && chunk.converged === false) {
+    currentEl.textContent = "Não convergiu a tempo - parou sem atingir 100%.";
+    currentEl.className = "dr-card-current dr-card-done-msg";
+    currentEl.style.color = "#e08a8a";
+  } else if (chunk.done) {
+    currentEl.textContent = "Objetivo alcançado";
+    currentEl.className = "dr-card-current dr-card-done-msg";
+    currentEl.style.color = "";
+  } else if (chunk.summary) {
+    currentEl.className = "dr-card-current";
+    currentEl.style.color = "";
+    currentEl.replaceChildren();
+    const summaryLabel = document.createElement("b");
+    summaryLabel.textContent = "Boreas:";
+    currentEl.append(summaryLabel, document.createTextNode(` ${String(chunk.summary).slice(0, 2000)}`));
+  }
+
+  // Safety net: the card is the source of truth for "finished or not". If
+  // the event arrived marked as done, makes sure the stop button reverts to
+  // normal even if the original promise that opened this fetch got stuck on
+  // a dropped connection (common in long-polling behind a proxy/tunnel).
+  if (chunk.done) { loading = false; hideStopBtn(); }
+
+  scrollToBottom();
+}
+
+export {};

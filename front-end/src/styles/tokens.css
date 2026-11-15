@@ -1,0 +1,23 @@
+:root {
+  --bg: #080b0d;
+  --bg-elev: #10151a;
+  --surface: rgba(230, 245, 250, .035);
+  --surface-strong: rgba(230, 245, 250, .065);
+  --border: rgba(210, 235, 240, .12);
+  --border-soft: rgba(210, 235, 240, .075);
+  --text: #f4f8f9;
+  --text-dim: rgba(232, 242, 244, .66);
+  --text-faint: rgba(214, 230, 234, .43);
+  --text-ghost: rgba(214, 230, 234, .28);
+  --accent: #2f8f9d;
+  --accent-strong: #52b3bf;
+  --accent-text: #7fd0da;
+  --accent-soft: rgba(47, 143, 157, .16);
+  --chip: #141b1f;
+  --hover: rgba(230, 245, 250, .08);
+  --shadow-lg: 0 1px 2px rgba(0, 0, 0, .28);
+  --radius-xl: 14px;
+  --radius-lg: 11px;
+  --user-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono-font: 'Geist Mono', 'SF Mono', monospace;
+}

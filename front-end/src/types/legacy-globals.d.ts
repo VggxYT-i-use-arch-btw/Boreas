@@ -1,0 +1,111 @@
+declare function renderSidebar(): void;
+declare function compressImage(file: File): Promise<string>;
+declare function createAttachCard(options: { name: string; mime: string; removable?: boolean; onRemove?: (() => void) | null; onClick?: ((event: MouseEvent) => void) | null }): HTMLDivElement;
+declare function requestPersistentStorage(): Promise<void>;
+declare const attachBtn: HTMLElement | null;
+declare const fileInput: HTMLElement | null;
+declare function showToast(message: string): void;
+declare function hoursAgo(timestamp: number): string;
+declare function loadMemoryIntoSettings(): Promise<void>;
+declare function closeSidebar(): void;
+declare function updateSidebarUser(): void;
+declare function closeUsageModal(): void;
+declare function closeSettingsSubview(): void;
+declare function boreasHttpError(response: Response): Promise<Error>;
+declare const SETTINGS_ICONS: Record<string, string>;
+declare var _memoryCache: string;
+declare function deleteChat(id: string): Promise<void>;
+declare function setChatTitle(id: string, title: string): void;
+declare function loadChat(id: string, options?: { skipRemote?: boolean; cachedChat?: (Partial<import("./chat").Conversation> & { id: string; messages?: import("./chat").ChatMessage[] }) | null }): Promise<void>;
+declare var _memoryLastUpdate: number;
+
+interface BoreasLegacyApi {
+  chats: { search(query: string): Promise<unknown[]> };
+}
+
+declare var BoreasSync: import("../api/sync").BoreasSyncApi;
+declare var _chatsMeta: Record<string, import("./chat").Conversation & { hasMessages?: boolean; memoryProcessedUpTo?: number }>;
+declare var messages: import("./chat").ChatMessage[];
+declare var pendingImages: string[];
+declare var pendingFile: import("./chat").PendingFile | null;
+declare var loading: boolean;
+declare var currentAbortController: AbortController | null;
+declare var warnShownThisSession: boolean;
+declare var currentTier: string;
+declare var currentSpeed: string;
+declare var currentEffort: string;
+declare var ACTIVE_KEY: string;
+declare var LAST_TIER_KEY: string;
+declare var ACCOUNT_SCOPE: string;
+declare var memoryEnabledGlobal: boolean;
+declare var chatMemoryEnabled: boolean;
+declare var chatHasMessages: boolean;
+declare var modelLabel: HTMLSpanElement;
+declare var sendBtn: HTMLButtonElement;
+declare var messagesEl: HTMLDivElement;
+declare function renderSidebar(): void;
+declare function hideStopBtn(): void;
+declare function removeTyping(): void;
+declare function updateMemoryBtns(): void;
+declare function updateImageAttach(): void;
+declare function clearActivePlugin(): void;
+declare function closeMentionPopup(): void;
+declare function applyInputShape(isExpanded: boolean): void;
+declare function setGreeting(): void;
+declare function appendMessage(role: string, text: string, images?: string[] | null, index?: number, attachments?: import("./chat").MessageAttachment[] | null, plugin?: string | null, steps?: import("./chat").ToolStep[] | null, activity?: import("./chat").ChatMessage["activity"] | null, file?: { name: string; content: string } | null, thinkingSummary?: unknown): void;
+declare function updateScrollBtn(): void;
+declare function scrollToBottom(): void;
+declare function getPendingGen(): { genId?: string; chatId?: string } | null;
+declare function resumePending(): void | Promise<void>;
+declare function updateRegenerateAvailability(): void;
+declare function ensureThinkingSegment(state: unknown, mount: (pill: HTMLElement, detail: HTMLElement) => void): unknown;
+declare function ensureToolActivityCard(container: HTMLElement, step: import("./chat").ToolStep, state: unknown, mount: (pill: HTMLElement, detail: HTMLElement) => void): HTMLElement | null;
+declare function finalizeThinkingSegment(state: unknown): void;
+declare function showInlineToolResult(container: HTMLElement, stepId: string, tool: string, output: unknown, before: HTMLElement | null, value: string): void;
+declare function escHtml(value: unknown): string;
+declare function saveCurrentMessages(): Promise<void>;
+declare function retryFromUser(row: HTMLElement): Promise<void>;
+declare function editUserMessage(row: HTMLElement, text: string, images: string[]): void;
+declare function canRetryFromUserRow(row: HTMLElement): boolean;
+declare function showUserCtxMenu(x: number, y: number, row: HTMLElement, text: string, images: string[]): void;
+declare function createFileCard(name: string, data: string, mime: string): HTMLElement;
+declare function renderDeepResearchCard(container: HTMLElement, payload: Record<string, unknown>): void;
+declare function renderAgenticLoopCard(container: HTMLElement, payload: Record<string, unknown>): void;
+declare function renderAskUserPromptRecap(container: HTMLElement, payload: { questions: unknown[]; answers: unknown; timedOut: boolean }): void;
+declare function renderAskUserPromptCard(container: HTMLElement, promptId: string, questions: unknown[]): Promise<unknown>;
+declare function createSourcesButton(results: unknown[]): HTMLElement;
+declare function savePendingGen(genId: string, chatId: string | null): void;
+declare function showStopBtn(): void;
+declare function startElapsedTicker(getBubble: () => HTMLElement | null, startedAt: number): () => void;
+declare function startNoResponseWatchdog(getBubble: () => HTMLElement | null, onTimeout: () => void): () => void;
+declare function syncGeneration(genId: string): Promise<void>;
+declare function boreasRandomWorkStatus(): string;
+declare function showNoResponseError(retry: () => void): void;
+declare function showSyncBanner(genId: string): void;
+declare function clearPendingGen(): void;
+declare function closeExtraThink(state: unknown): void;
+declare function scheduleMarkdownRender(bubble: HTMLElement, text: string): void;
+declare function refreshPersistedThinkingSummary(payload: { chatId: string | null; genId: string | null; activity: unknown; assistantMessage: import("./chat").ChatMessage }): void;
+declare function renderMarkdown(container: HTMLElement, text: string): void;
+declare function copyText(text: string, button: HTMLButtonElement): void;
+declare function regenerate(row: HTMLElement, bubble: HTMLElement, actions: HTMLElement): Promise<void>;
+declare function openLightbox(source: string): void;
+declare function renderPreviewThumbs(): void;
+declare var msgInput: HTMLTextAreaElement;
+declare var autoScroll: boolean;
+declare var MAX_IMAGES: number;
+declare const PLUGINS: Array<{ label: string; icon: string }>;
+declare const TOOL_ACTIVITY_LABELS: Record<string, string>;
+declare function idbSetImage(key: string, data: string): Promise<void>;
+declare function idbGetImages(keys: string[]): Promise<Map<string, string>>;
+declare function idbDeleteByPrefix(prefix: string): Promise<void>;
+
+interface Window {
+  __boreasSearchQuery: string;
+  __boreasSearchResults: unknown[];
+  __boreasSearchPending: boolean;
+}
+
+interface ServiceWorkerRegistration {
+  sync?: { register(tag: string): Promise<void> };
+}
